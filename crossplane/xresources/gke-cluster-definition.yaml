@@ -1,0 +1,131 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: CompositeResourceDefinition
+metadata:
+  name: xgkeclusters.platform.commercelab.io
+spec:
+  group: platform.commercelab.io
+  names:
+    kind: XGKECluster
+    plural: xgkeclusters
+  claimNames:
+    kind: GKECluster
+    plural: gkeclusters
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                providerConfigRef:
+                  description: Reference to the provider configuration
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required:
+                    - name
+                projectID:
+                  description: GCP Project ID
+                  type: string
+                location:
+                  description: GCP region for the cluster
+                  type: string
+                  default: us-central1
+                clusterVersion:
+                  description: Kubernetes version for the cluster
+                  type: string
+                  default: latest
+                releaseChannel:
+                  description: Release channel for GKE
+                  type: string
+                  default: REGULAR
+                  enum:
+                    - RAPID
+                    - REGULAR
+                    - STABLE
+                maintenanceWindow:
+                  description: Maintenance window configuration
+                  type: object
+                  properties:
+                    startTime:
+                      description: Start time for maintenance window in HH:MM format
+                      type: string
+                      default: "03:00"
+                  required:
+                    - startTime
+                network:
+                  description: Network configuration
+                  type: object
+                  properties:
+                    name:
+                      description: VPC network name
+                      type: string
+                    subnetName:
+                      description: Subnet name
+                      type: string
+                    clusterPodRangeName:
+                      description: Name of the secondary IP range for pods
+                      type: string
+                    clusterSvcRangeName:
+                      description: Name of the secondary IP range for services
+                      type: string
+                  required:
+                    - name
+                    - subnetName
+                    - clusterPodRangeName
+                    - clusterSvcRangeName
+                nodeConfig:
+                  description: Node pool configuration
+                  type: object
+                  properties:
+                    nodeCount:
+                      description: Number of nodes in the node pool
+                      type: integer
+                      default: 1
+                    machineType:
+                      description: GCP machine type
+                      type: string
+                      default: e2-standard-2
+                    diskSizeGb:
+                      description: Size of the disk in GB
+                      type: integer
+                      default: 100
+                    diskType:
+                      description: Type of disk
+                      type: string
+                      default: pd-standard
+                    serviceAccount:
+                      description: Service account email to use for nodes
+                      type: string
+                    autoscaling:
+                      description: Node autoscaling configuration
+                      type: object
+                      properties:
+                        minNodeCount:
+                          description: Minimum number of nodes
+                          type: integer
+                          default: 1
+                        maxNodeCount:
+                          description: Maximum number of nodes
+                          type: integer
+                          default: 5
+                      required:
+                        - minNodeCount
+                        - maxNodeCount
+                    labels:
+                      description: Labels to apply to the nodes
+                      type: object
+                      additionalProperties:
+                        type: string
+                  required:
+                    - serviceAccount
+              required:
+                - providerConfigRef
+                - projectID
+                - network
+                - nodeConfig

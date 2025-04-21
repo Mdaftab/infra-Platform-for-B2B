@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-credentials
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  # Replace these values with your actual repository details
+  url: https://github.com/your-username/lab_commercelab.git
+  username: git
+  password: YOUR_GITHUB_PAT_OR_PASSWORD
+  type: git
+  # For SSH authentication, uncomment and populate these fields instead
+  # sshPrivateKey: |
+  #   PRIVATE_KEY_CONTENT

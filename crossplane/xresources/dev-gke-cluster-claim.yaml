@@ -1,0 +1,35 @@
+apiVersion: platform.commercelab.io/v1alpha1
+kind: GKECluster
+metadata:
+  name: app-cluster
+  namespace: default
+  labels:
+    environment: dev
+    name: app
+    role: application
+spec:
+  providerConfigRef:
+    name: default
+  projectID: your-gcp-project-id
+  location: us-central1
+  clusterVersion: 1.28
+  releaseChannel: REGULAR
+  maintenanceWindow:
+    startTime: "03:00"
+  network:
+    name: dev-vpc
+    subnetName: dev-private-subnet
+    clusterPodRangeName: dev-private-subnet-pods
+    clusterSvcRangeName: dev-private-subnet-services
+  nodeConfig:
+    nodeCount: 2
+    machineType: e2-standard-2
+    diskSizeGb: 100
+    diskType: pd-standard
+    serviceAccount: dev-gke-node-sa@your-gcp-project-id.iam.gserviceaccount.com
+    autoscaling:
+      minNodeCount: 1
+      maxNodeCount: 5
+    labels:
+      environment: dev
+      role: application

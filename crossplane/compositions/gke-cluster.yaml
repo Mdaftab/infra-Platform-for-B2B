@@ -1,0 +1,168 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xgkeclusters.platform.commercelab.io
+  labels:
+    provider: gcp
+    service: gke
+spec:
+  compositeTypeRef:
+    apiVersion: platform.commercelab.io/v1alpha1
+    kind: XGKECluster
+  patchSets:
+  - name: common-parameters
+    patches:
+    - fromFieldPath: spec.clusterVersion
+      toFieldPath: spec.forProvider.initialClusterVersion
+    - fromFieldPath: spec.nodeConfig.machineType
+      toFieldPath: spec.forProvider.nodeConfig[0].machineType
+    - fromFieldPath: spec.nodeConfig.diskSizeGb
+      toFieldPath: spec.forProvider.nodeConfig[0].diskSizeGb
+    - fromFieldPath: spec.nodeConfig.diskType
+      toFieldPath: spec.forProvider.nodeConfig[0].diskType
+  resources:
+    - name: gke-cluster
+      base:
+        apiVersion: container.gcp.upbound.io/v1beta1
+        kind: Cluster
+        metadata:
+          annotations:
+            crossplane.io/external-name: $(common.metadata.labels.environment)-$(common.metadata.labels.name)
+        spec:
+          forProvider:
+            location: us-central1
+            initialNodeCount: 1
+            loggingService: logging.googleapis.com/kubernetes
+            monitoringService: monitoring.googleapis.com/kubernetes
+            networkingMode: VPC_NATIVE
+            removeDefaultNodePool: true
+            ipAllocationPolicy:
+              - clusterSecondaryRangeName: $(spec.network.clusterPodRangeName)
+                servicesSecondaryRangeName: $(spec.network.clusterSvcRangeName)
+            network: projects/$(spec.projectID)/global/networks/$(spec.network.name)
+            subnetwork: projects/$(spec.projectID)/regions/$(spec.location)/subnetworks/$(spec.network.subnetName)
+            releaseChannel:
+              - channel: $(spec.releaseChannel)
+            datapathProvider: ADVANCED_DATAPATH
+            workloadIdentityConfig:
+              - workloadPool: $(spec.projectID).svc.id.goog
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
+      patches:
+        # Patch cluster metadata
+        - fromFieldPath: metadata.name
+          toFieldPath: metadata.name
+        - fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+        - fromFieldPath: metadata.annotations
+          toFieldPath: metadata.annotations
+
+        # Patch connection secret config
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "cluster-%s"
+
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+
+        # Patch location
+        - fromFieldPath: spec.location
+          toFieldPath: spec.forProvider.location
+
+        # Patch version
+        - fromFieldPath: spec.clusterVersion
+          toFieldPath: spec.forProvider.minMasterVersion
+
+        # Patch maintenance policy
+        - fromFieldPath: spec.maintenanceWindow.startTime
+          toFieldPath: spec.forProvider.maintenancePolicy[0].dailyMaintenanceWindow[0].startTime
+          transforms:
+            - type: string
+              string:
+                fmt: "%s:00"
+
+    - name: gke-node-pool
+      base:
+        apiVersion: container.gcp.upbound.io/v1beta1
+        kind: NodePool
+        metadata:
+          annotations:
+            crossplane.io/external-name: $(common.metadata.labels.environment)-$(common.metadata.labels.name)-nodes
+        spec:
+          forProvider:
+            location: us-central1
+            nodeCount: 1
+            nodeConfig:
+              - diskSizeGb: 100
+                diskType: pd-standard
+                imageType: COS_CONTAINERD
+                machineType: e2-standard-2
+                oauthScopes:
+                  - https://www.googleapis.com/auth/cloud-platform
+                serviceAccount: $(spec.nodeConfig.serviceAccount)
+                metadata:
+                  disable-legacy-endpoints: "true"
+                shieldedInstanceConfig:
+                  - enableIntegrityMonitoring: true
+                    enableSecureBoot: true
+                workloadMetadataConfig:
+                  - mode: GKE_METADATA
+                labels:
+                  environment: $(common.metadata.labels.environment)
+                  role: $(common.metadata.labels.role)
+            management:
+              - autoRepair: true
+                autoUpgrade: true
+            maxPodsPerNode: 110
+      patches:
+        # Patch node pool metadata
+        - fromFieldPath: metadata.name
+          toFieldPath: metadata.name
+        - fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+        - fromFieldPath: metadata.annotations
+          toFieldPath: metadata.annotations
+
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+
+        # Link to cluster
+        - fromFieldPath: metadata.name
+          toFieldPath: spec.forProvider.cluster
+          transforms:
+            - type: string
+              string:
+                fmt: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)"
+
+        # Patch location
+        - fromFieldPath: spec.location
+          toFieldPath: spec.forProvider.location
+
+        # Patch node count
+        - fromFieldPath: spec.nodeConfig.nodeCount
+          toFieldPath: spec.forProvider.nodeCount
+
+        # Patch node pool configs
+        - type: PatchSet
+          patchSetName: common-parameters
+
+        # Patch autoscaling if enabled
+        - fromFieldPath: spec.nodeConfig.autoscaling.minNodeCount
+          toFieldPath: spec.forProvider.autoscaling[0].minNodeCount
+          policy:
+            fromFieldPath: Required
+        - fromFieldPath: spec.nodeConfig.autoscaling.maxNodeCount
+          toFieldPath: spec.forProvider.autoscaling[0].maxNodeCount
+          policy:
+            fromFieldPath: Required
+
+        # Patch node labels if provided
+        - fromFieldPath: spec.nodeConfig.labels
+          toFieldPath: spec.forProvider.nodeConfig[0].labels
+          policy:
+            fromFieldPath: Optional

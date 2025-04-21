@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hello-world-multi-cluster
+  namespace: argocd
+spec:
+  generators:
+  - clusters:
+      selector:
+        matchLabels:
+          environment: "managed-by-crossplane"
+  template:
+    metadata:
+      name: 'hello-world-{{name}}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/your-username/lab_commercelab.git
+        targetRevision: HEAD
+        path: workloads/hello-world
+        helm:
+          valueFiles:
+          - values.yaml
+          parameters:
+          - name: image.repository
+            value: gcr.io/your-gcp-project-id/hello-world
+          - name: image.tag
+            value: latest
+          - name: environment
+            value: '{{metadata.labels.environment}}'
+      destination:
+        server: '{{server}}'
+        namespace: default
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true

@@ -1,0 +1,24 @@
+apiVersion: kubernetes.crossplane.io/v1alpha1
+kind: ProviderConfig
+metadata:
+  name: default
+  namespace: crossplane-system
+spec:
+  credentials:
+    source: InjectedIdentity
+  # The following is to allow crossplane to create resources in all namespaces
+  identityRef:
+    name: provider-kubernetes
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: provider-kubernetes-admin-binding
+subjects:
+- kind: ServiceAccount
+  name: provider-kubernetes
+  namespace: crossplane-system
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
