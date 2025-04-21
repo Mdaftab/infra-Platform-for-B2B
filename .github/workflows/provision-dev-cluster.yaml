@@ -1,8 +1,17 @@
-name: Provision Dev GKE Cluster
+name: Provision Application Clusters with Crossplane
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
       email:
         description: 'Email for Let''s Encrypt certificate'
         required: false
@@ -14,10 +23,13 @@ on:
 
 jobs:
   provision-cluster:
-    name: Provision Dev GKE Cluster with Crossplane
+    name: Provision GKE Cluster with Crossplane
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     
+    env:
+      TARGET_ENV: ${{ github.event.inputs.environment || 'dev' }}
+      
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -45,53 +57,54 @@ jobs:
           echo "KUBECONFIG=$(pwd)/tmp/kubeconfig.yaml" >> $GITHUB_ENV
           chmod 600 $(pwd)/tmp/kubeconfig.yaml
 
-      - name: Prepare and Apply Dev Cluster Claim
+      - name: Prepare and Apply Cluster Claim
         run: |
-          # Replace placeholders in dev cluster claim
-          sed -i "s/\${GCP_PROJECT_ID}/${{ secrets.GCP_PROJECT_ID }}/g" crossplane/xresources/dev-gke-cluster-claim.yaml
+          # Replace placeholders in cluster claim
+          sed -i "s/\${GCP_PROJECT_ID}/${{ secrets.GCP_PROJECT_ID }}/g" crossplane/xresources/${TARGET_ENV}-gke-cluster-claim.yaml
           
-          # Apply dev GKE cluster claim
-          kubectl apply -f crossplane/xresources/dev-gke-cluster-claim.yaml
+          # Apply GKE cluster claim
+          echo "Applying ${TARGET_ENV} GKE cluster claim..."
+          kubectl apply -f crossplane/xresources/${TARGET_ENV}-gke-cluster-claim.yaml
           
-          # Wait for dev cluster to be ready (this may take some time)
-          echo "Waiting for dev GKE cluster to be provisioned (may take 10+ minutes)..."
-          kubectl wait --for=condition=ready gkecluster.platform.commercelab.io/dev-gke-cluster --timeout=900s
+          # Wait for cluster to be ready (this may take some time)
+          echo "Waiting for ${TARGET_ENV} GKE cluster to be provisioned (may take 10+ minutes)..."
+          kubectl wait --for=condition=ready gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster --timeout=900s
           
-          # Get dev cluster name
-          DEV_CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/dev-gke-cluster -o jsonpath='{.status.clusterName}')
-          echo "Dev cluster name: $DEV_CLUSTER_NAME"
+          # Get cluster name
+          CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster -o jsonpath='{.status.clusterName}')
+          echo "${TARGET_ENV} cluster name: $CLUSTER_NAME"
           
-          # Get dev cluster credentials
-          gcloud container clusters get-credentials $DEV_CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }}
+          # Get cluster credentials
+          gcloud container clusters get-credentials $CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }}
           
-          # Save dev cluster kubeconfig for future use
-          KUBECONFIG_DEV="$(pwd)/dev-cluster-kubeconfig.yaml"
-          gcloud container clusters get-credentials $DEV_CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }} --kubeconfig $KUBECONFIG_DEV
+          # Save cluster kubeconfig for future use
+          KUBECONFIG_APP="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
+          gcloud container clusters get-credentials $CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }} --kubeconfig $KUBECONFIG_APP
           
-          # Store dev cluster kubeconfig
-          echo "DEV_KUBECONFIG_DATA=$(cat $KUBECONFIG_DEV | base64 -w 0)" >> $GITHUB_ENV
+          # Store cluster kubeconfig
+          echo "${TARGET_ENV}_KUBECONFIG_DATA=$(cat $KUBECONFIG_APP | base64 -w 0)" >> $GITHUB_ENV
 
-      - name: Store Dev Cluster Kubeconfig
-        id: store-dev-kubeconfig
+      - name: Store Application Cluster Kubeconfig
+        id: store-app-kubeconfig
         uses: actions/upload-artifact@v3
         with:
-          name: dev-cluster-kubeconfig
-          path: dev-cluster-kubeconfig.yaml
+          name: ${{ env.TARGET_ENV }}-cluster-kubeconfig
+          path: ${{ env.TARGET_ENV }}-cluster-kubeconfig.yaml
           retention-days: 1
           
-      - name: Install Add-ons on Dev Cluster
+      - name: Install Add-ons on Application Cluster
         run: |
           # Set up environment variables
-          DEV_CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/dev-gke-cluster -o jsonpath='{.status.clusterName}')
+          CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster -o jsonpath='{.status.clusterName}')
           EMAIL="${{ github.event.inputs.email || 'admin@example.com' }}"
           GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
-          GCP_EXTERNAL_SECRETS_SA="dev-external-secrets-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          GCP_EXTERNAL_SECRETS_SA="shared-external-secrets-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
           
-          echo "Installing add-ons on cluster $DEV_CLUSTER_NAME..."
+          echo "Installing add-ons on ${TARGET_ENV} cluster $CLUSTER_NAME..."
           
-          # Set context to dev cluster
-          KUBECONFIG_DEV="$(pwd)/dev-cluster-kubeconfig.yaml"
-          export KUBECONFIG=$KUBECONFIG_DEV
+          # Set context to application cluster
+          KUBECONFIG_APP="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
+          export KUBECONFIG=$KUBECONFIG_APP
           
           # Run the comprehensive add-ons installation script
           ./kubernetes-addons/install.sh "$EMAIL" "$GCP_PROJECT_ID" "$GCP_EXTERNAL_SECRETS_SA"

@@ -1,8 +1,17 @@
-name: Deploy Application to Dev Cluster
+name: Deploy Application to Cluster
 
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
       domain:
         description: 'Domain name for the application'
         required: false
@@ -12,7 +21,7 @@ on:
         required: false
         default: 'admin@example.com'
   workflow_run:
-    workflows: ["Provision Dev GKE Cluster"]
+    workflows: ["Provision Application Clusters with Crossplane"]
     types:
       - completed
 
@@ -21,6 +30,9 @@ jobs:
     name: Build and Deploy Application
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    env:
+      TARGET_ENV: ${{ github.event.inputs.environment || 'dev' }}
     
     steps:
       - name: Checkout code
@@ -46,20 +58,20 @@ jobs:
       - name: Configure Docker
         run: gcloud auth configure-docker
 
-      - name: Download Dev Cluster Kubeconfig
+      - name: Download Application Cluster Kubeconfig
         uses: actions/download-artifact@v3
         with:
-          name: dev-cluster-kubeconfig
+          name: ${{ env.TARGET_ENV }}-cluster-kubeconfig
           path: ./tmp
 
       - name: Set KUBECONFIG Environment Variable
         run: |
-          echo "KUBECONFIG=$(pwd)/tmp/dev-cluster-kubeconfig.yaml" >> $GITHUB_ENV
-          chmod 600 $(pwd)/tmp/dev-cluster-kubeconfig.yaml
+          echo "KUBECONFIG=$(pwd)/tmp/${{ env.TARGET_ENV }}-cluster-kubeconfig.yaml" >> $GITHUB_ENV
+          chmod 600 $(pwd)/tmp/${{ env.TARGET_ENV }}-cluster-kubeconfig.yaml
           
       - name: Verify Add-ons Installation
         run: |
-          echo "Verifying Kubernetes add-ons installation..."
+          echo "Verifying Kubernetes add-ons installation on ${{ env.TARGET_ENV }} cluster..."
           
           # Check NGINX Ingress Controller
           if kubectl get service -n ingress-nginx ingress-nginx-controller >/dev/null 2>&1; then
@@ -119,28 +131,83 @@ jobs:
       - name: Build and Push Container Image
         working-directory: workloads/hello-world/app
         run: |
-          IMAGE_NAME="gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world:${{ github.sha }}"
+          # Add environment tag to image for environment-specific deployments
+          IMAGE_NAME="gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world:${{ env.TARGET_ENV }}-${{ github.sha }}"
           docker build -t $IMAGE_NAME .
           docker push $IMAGE_NAME
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+      - name: Environment-specific Deployment Preparation 
+        run: |
+          # Set environment-specific values
+          case "${{ env.TARGET_ENV }}" in
+            dev)
+              echo "Setting dev environment configurations..."
+              REPLICAS=1
+              RESOURCE_LIMITS_CPU="100m"
+              RESOURCE_LIMITS_MEMORY="128Mi"
+              RESOURCE_REQUESTS_CPU="50m"
+              RESOURCE_REQUESTS_MEMORY="64Mi"
+              ISSUER="letsencrypt-staging" # Use staging for dev to avoid hitting rate limits
+              ;;
+            staging)
+              echo "Setting staging environment configurations..."
+              REPLICAS=2
+              RESOURCE_LIMITS_CPU="200m"
+              RESOURCE_LIMITS_MEMORY="256Mi"
+              RESOURCE_REQUESTS_CPU="100m"
+              RESOURCE_REQUESTS_MEMORY="128Mi"
+              ISSUER="letsencrypt-staging"
+              ;;
+            prod)
+              echo "Setting production environment configurations..."
+              REPLICAS=3
+              RESOURCE_LIMITS_CPU="500m"
+              RESOURCE_LIMITS_MEMORY="512Mi"
+              RESOURCE_REQUESTS_CPU="200m"
+              RESOURCE_REQUESTS_MEMORY="256Mi"
+              ISSUER="letsencrypt-prod" # Use production for real certificates
+              ;;
+            *)
+              echo "Unknown environment: ${{ env.TARGET_ENV }}"
+              exit 1
+              ;;
+          esac
+          
+          # Export environment variables for next steps
+          echo "REPLICAS=$REPLICAS" >> $GITHUB_ENV
+          echo "RESOURCE_LIMITS_CPU=$RESOURCE_LIMITS_CPU" >> $GITHUB_ENV
+          echo "RESOURCE_LIMITS_MEMORY=$RESOURCE_LIMITS_MEMORY" >> $GITHUB_ENV
+          echo "RESOURCE_REQUESTS_CPU=$RESOURCE_REQUESTS_CPU" >> $GITHUB_ENV
+          echo "RESOURCE_REQUESTS_MEMORY=$RESOURCE_REQUESTS_MEMORY" >> $GITHUB_ENV
+          echo "ISSUER=$ISSUER" >> $GITHUB_ENV
 
       - name: Update Helm Values
         working-directory: workloads/hello-world
         run: |
           # Configure domain and settings
-          DOMAIN="${{ github.event.inputs.domain || 'hello-world.example.com' }}"
+          DOMAIN="${{ github.event.inputs.domain || format('hello-world-%s.example.com', env.TARGET_ENV) }}"
           GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           
           # Update image repository and tag in values.yaml
           sed -i "s|repository:.*|repository: gcr.io/$GCP_PROJECT_ID/hello-world|" values.yaml
-          sed -i "s|tag:.*|tag: ${{ github.sha }}|" values.yaml
+          sed -i "s|tag:.*|tag: ${{ env.TARGET_ENV }}-${{ github.sha }}|" values.yaml
+          
+          # Update replica count based on environment
+          sed -i "s|replicaCount:.*|replicaCount: ${{ env.REPLICAS }}|" values.yaml
+          
+          # Update resource requests/limits based on environment
+          sed -i "/resources:/,/limits:/ s/cpu:.*/cpu: ${{ env.RESOURCE_LIMITS_CPU }}/" values.yaml
+          sed -i "/resources:/,/memory:/ s/memory:.*/memory: ${{ env.RESOURCE_LIMITS_MEMORY }}/" values.yaml
+          sed -i "/requests:/,/cpu:/ s/cpu:.*/cpu: ${{ env.RESOURCE_REQUESTS_CPU }}/" values.yaml
+          sed -i "/requests:/,/memory:/ s/memory:.*/memory: ${{ env.RESOURCE_REQUESTS_MEMORY }}/" values.yaml
           
           # Update ingress settings for NGINX and TLS
           sed -i "s|className:.*|className: \"nginx\"|" values.yaml
           
           # Make sure we have the right annotations
           grep -q "cert-manager.io/cluster-issuer" values.yaml || \
-            sed -i "/annotations:/a\\    cert-manager.io/cluster-issuer: \"letsencrypt-staging\"" values.yaml
+            sed -i "/annotations:/a\\    cert-manager.io/cluster-issuer: \"${{ env.ISSUER }}\"" values.yaml
           
           grep -q "nginx.ingress.kubernetes.io/ssl-redirect" values.yaml || \
             sed -i "/annotations:/a\\    nginx.ingress.kubernetes.io/ssl-redirect: \"true\"" values.yaml
@@ -152,12 +219,12 @@ jobs:
           if ! grep -q "tls:" values.yaml; then
             cat << EOF >> values.yaml
   tls:
-  - secretName: hello-world-tls
+  - secretName: hello-world-${{ env.TARGET_ENV }}-tls
     hosts:
     - $DOMAIN
 EOF
           else
-            sed -i "s|secretName:.*|secretName: hello-world-tls|" values.yaml
+            sed -i "s|secretName:.*|secretName: hello-world-${{ env.TARGET_ENV }}-tls|" values.yaml
             sed -i "/hosts:/d" values.yaml
             sed -i "/secretName:/a\\    hosts:\\n    - $DOMAIN" values.yaml
           fi
@@ -166,43 +233,46 @@ EOF
           sed -i 's/useExternalSecrets:.*/useExternalSecrets: true/' values.yaml
           
           # Show final configuration
-          echo "Final application configuration:"
+          echo "Final application configuration for ${{ env.TARGET_ENV }} environment:"
           cat values.yaml
 
       - name: Deploy Application using Helm
         working-directory: workloads/hello-world
         run: |
           # Create namespace if it doesn't exist
-          kubectl create namespace hello-world --dry-run=client -o yaml | kubectl apply -f -
+          NAMESPACE="hello-world-${{ env.TARGET_ENV }}"
+          kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
           
           # Install/upgrade Helm chart
-          helm upgrade --install hello-world . -n hello-world
+          helm upgrade --install hello-world-${{ env.TARGET_ENV }} . -n $NAMESPACE
 
       - name: Wait for Deployment
         run: |
+          NAMESPACE="hello-world-${{ env.TARGET_ENV }}"
+          
           echo "Waiting for deployment to be available..."
-          kubectl wait --for=condition=available deployment/hello-world --timeout=300s -n hello-world
+          kubectl wait --for=condition=available deployment/hello-world-${{ env.TARGET_ENV }} --timeout=300s -n $NAMESPACE
           
           # Get deployment details
           echo "Deployment details:"
-          kubectl get deployment -n hello-world -o wide
+          kubectl get deployment -n $NAMESPACE -o wide
           
           # Get pod details
           echo "Pod details:"
-          kubectl get pods -n hello-world -o wide
-
+          kubectl get pods -n $NAMESPACE -o wide
+          
           # Get service details
           echo "Service details:"
-          kubectl get service -n hello-world -o wide
+          kubectl get service -n $NAMESPACE -o wide
           
           # Get ingress details
           echo "Ingress details:"
-          kubectl get ingress -n hello-world -o wide
+          kubectl get ingress -n $NAMESPACE -o wide
           
           # Check if TLS certificate is issued
           echo "TLS certificate status:"
-          kubectl get certificate -n hello-world
-
+          kubectl get certificate -n $NAMESPACE
+          
           # Get NGINX Ingress Controller external IP
           echo "Retrieving NGINX Ingress Controller external IP..."
           COUNTER=0
@@ -221,23 +291,24 @@ EOF
             INGRESS_IP="<pending>"
           fi
           
-          DOMAIN="${{ github.event.inputs.domain || 'hello-world.example.com' }}"
+          DOMAIN="${{ github.event.inputs.domain || format('hello-world-%s.example.com', env.TARGET_ENV) }}"
           
           echo "============================================================="
-          echo "✅ Application '${{ github.repository }}' successfully deployed! ✅"
+          echo "✅ Application successfully deployed to ${{ env.TARGET_ENV }} environment! ✅"
           echo "============================================================="
           echo "📊 Application information:"
-          echo "   - Namespace:      hello-world"
-          echo "   - Release name:   hello-world"
-          echo "   - Image:          gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world:${{ github.sha }}"
+          echo "   - Environment:     ${{ env.TARGET_ENV }}"
+          echo "   - Namespace:       $NAMESPACE"
+          echo "   - Release name:    hello-world-${{ env.TARGET_ENV }}"
+          echo "   - Image:           ${{ env.IMAGE_NAME }}"
           echo ""
           echo "🔗 Access URLs:"
           echo "   - Using IP directly:   http://$INGRESS_IP"
           echo "   - With proper DNS:     https://$DOMAIN"
           echo ""
           echo "🔐 TLS:"
-          echo "   - Certificate:         hello-world-tls"
-          echo "   - Issuer:              letsencrypt-staging"
+          echo "   - Certificate:         hello-world-${{ env.TARGET_ENV }}-tls"
+          echo "   - Issuer:              ${{ env.ISSUER }}"
           echo ""
           echo "📝 NOTE: To access the application using the domain name, you need to:"
           echo "   1. Configure your DNS to point $DOMAIN to $INGRESS_IP"

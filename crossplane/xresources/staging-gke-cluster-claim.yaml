@@ -1,10 +1,10 @@
 apiVersion: platform.commercelab.io/v1alpha1
 kind: GKECluster
 metadata:
-  name: dev-gke-cluster
+  name: staging-gke-cluster
   labels:
-    environment: dev
-    name: devcluster
+    environment: staging
+    name: stagingcluster
     role: application
 spec:
   providerConfigRef:
@@ -14,21 +14,21 @@ spec:
   clusterVersion: 1.28
   releaseChannel: REGULAR
   maintenanceWindow:
-    startTime: "03:00"
+    startTime: "02:00"
   network:
     name: infracluster-vpc  # Using the same VPC as infracluster
     subnetName: infracluster-private-subnet
     clusterPodRangeName: infracluster-private-subnet-pods
     clusterSvcRangeName: infracluster-private-subnet-services
   nodeConfig:
-    nodeCount: 1
+    nodeCount: 2
     machineType: e2-standard-2
-    diskSizeGb: 50
+    diskSizeGb: 70
     diskType: pd-standard
     serviceAccount: shared-gke-node-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
     autoscaling:
-      minNodeCount: 1
-      maxNodeCount: 3
+      minNodeCount: 2
+      maxNodeCount: 5
     labels:
-      environment: dev
+      environment: staging
       role: application

@@ -1,10 +1,10 @@
 apiVersion: platform.commercelab.io/v1alpha1
 kind: GKECluster
 metadata:
-  name: dev-gke-cluster
+  name: prod-gke-cluster
   labels:
-    environment: dev
-    name: devcluster
+    environment: prod
+    name: prodcluster
     role: application
 spec:
   providerConfigRef:
@@ -12,23 +12,23 @@ spec:
   projectID: ${GCP_PROJECT_ID}
   location: us-central1
   clusterVersion: 1.28
-  releaseChannel: REGULAR
+  releaseChannel: STABLE  # More stable release channel for production
   maintenanceWindow:
-    startTime: "03:00"
+    startTime: "01:00"
   network:
     name: infracluster-vpc  # Using the same VPC as infracluster
     subnetName: infracluster-private-subnet
     clusterPodRangeName: infracluster-private-subnet-pods
     clusterSvcRangeName: infracluster-private-subnet-services
   nodeConfig:
-    nodeCount: 1
-    machineType: e2-standard-2
-    diskSizeGb: 50
-    diskType: pd-standard
+    nodeCount: 3
+    machineType: e2-standard-4
+    diskSizeGb: 100
+    diskType: pd-ssd  # Better performance for production
     serviceAccount: shared-gke-node-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
     autoscaling:
-      minNodeCount: 1
-      maxNodeCount: 3
+      minNodeCount: 3
+      maxNodeCount: 7
     labels:
-      environment: dev
+      environment: prod
       role: application

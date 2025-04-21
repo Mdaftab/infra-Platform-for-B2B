@@ -5,21 +5,29 @@ metadata:
   labels:
     provider: gcp
     service: gke
+    type: application-cluster
 spec:
   compositeTypeRef:
     apiVersion: platform.commercelab.io/v1alpha1
     kind: XGKECluster
   patchSets:
-  - name: common-parameters
-    patches:
-    - fromFieldPath: spec.clusterVersion
-      toFieldPath: spec.forProvider.initialClusterVersion
-    - fromFieldPath: spec.nodeConfig.machineType
-      toFieldPath: spec.forProvider.nodeConfig[0].machineType
-    - fromFieldPath: spec.nodeConfig.diskSizeGb
-      toFieldPath: spec.forProvider.nodeConfig[0].diskSizeGb
-    - fromFieldPath: spec.nodeConfig.diskType
-      toFieldPath: spec.forProvider.nodeConfig[0].diskType
+    - name: common-parameters
+      patches:
+        - fromFieldPath: spec.clusterVersion
+          toFieldPath: spec.forProvider.initialClusterVersion
+        - fromFieldPath: spec.nodeConfig.machineType
+          toFieldPath: spec.forProvider.nodeConfig[0].machineType
+        - fromFieldPath: spec.nodeConfig.diskSizeGb
+          toFieldPath: spec.forProvider.nodeConfig[0].diskSizeGb
+        - fromFieldPath: spec.nodeConfig.diskType
+          toFieldPath: spec.forProvider.nodeConfig[0].diskType
+    - name: metadata-patch
+      patches:
+        - fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+        - fromFieldPath: metadata.annotations
+          toFieldPath: metadata.annotations
+
   resources:
     - name: gke-cluster
       base:
@@ -27,7 +35,9 @@ spec:
         kind: Cluster
         metadata:
           annotations:
-            crossplane.io/external-name: $(common.metadata.labels.environment)-$(common.metadata.labels.name)
+            crossplane.io/external-name: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)"
+          labels:
+            crossplane.io/composition: gke-cluster
         spec:
           forProvider:
             location: us-central1
@@ -46,24 +56,27 @@ spec:
             datapathProvider: ADVANCED_DATAPATH
             workloadIdentityConfig:
               - workloadPool: $(spec.projectID).svc.id.goog
+            maintenancePolicy:
+              - dailyMaintenanceWindow:
+                  - startTime: "03:00"
+            addonsConfig:
+              - httpLoadBalancing:
+                  - disabled: false
+                horizontalPodAutoscaling:
+                  - disabled: false
+                networkPolicyConfig:
+                  - disabled: false
+            binaryAuthorization:
+              - evaluationMode: PROJECT_SINGLETON_POLICY_ENFORCE
+            verticalPodAutoscaling:
+              - enabled: true
+            enableShieldedNodes: true
           writeConnectionSecretToRef:
             namespace: crossplane-system
       patches:
-        # Patch cluster metadata
-        - fromFieldPath: metadata.name
-          toFieldPath: metadata.name
-        - fromFieldPath: metadata.labels
-          toFieldPath: metadata.labels
-        - fromFieldPath: metadata.annotations
-          toFieldPath: metadata.annotations
-
-        # Patch connection secret config
-        - fromFieldPath: metadata.uid
-          toFieldPath: spec.writeConnectionSecretToRef.name
-          transforms:
-            - type: string
-              string:
-                fmt: "cluster-%s"
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
 
         # Patch provider configuration
         - fromFieldPath: spec.providerConfigRef.name
@@ -76,6 +89,14 @@ spec:
         # Patch version
         - fromFieldPath: spec.clusterVersion
           toFieldPath: spec.forProvider.minMasterVersion
+        
+        # Patch connection secret config
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "gke-cluster-%s"
 
         # Patch maintenance policy
         - fromFieldPath: spec.maintenanceWindow.startTime
@@ -91,7 +112,9 @@ spec:
         kind: NodePool
         metadata:
           annotations:
-            crossplane.io/external-name: $(common.metadata.labels.environment)-$(common.metadata.labels.name)-nodes
+            crossplane.io/external-name: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)-nodes"
+          labels:
+            crossplane.io/composition: gke-node-pool
         spec:
           forProvider:
             location: us-central1
@@ -102,7 +125,9 @@ spec:
                 imageType: COS_CONTAINERD
                 machineType: e2-standard-2
                 oauthScopes:
-                  - https://www.googleapis.com/auth/cloud-platform
+                  - https://www.googleapis.com/auth/logging.write
+                  - https://www.googleapis.com/auth/monitoring
+                  - https://www.googleapis.com/auth/devstorage.read_only
                 serviceAccount: $(spec.nodeConfig.serviceAccount)
                 metadata:
                   disable-legacy-endpoints: "true"
@@ -111,6 +136,8 @@ spec:
                     enableSecureBoot: true
                 workloadMetadataConfig:
                   - mode: GKE_METADATA
+                gvnic:
+                  - enabled: true
                 labels:
                   environment: $(common.metadata.labels.environment)
                   role: $(common.metadata.labels.role)
@@ -119,13 +146,9 @@ spec:
                 autoUpgrade: true
             maxPodsPerNode: 110
       patches:
-        # Patch node pool metadata
-        - fromFieldPath: metadata.name
-          toFieldPath: metadata.name
-        - fromFieldPath: metadata.labels
-          toFieldPath: metadata.labels
-        - fromFieldPath: metadata.annotations
-          toFieldPath: metadata.annotations
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
 
         # Patch provider configuration
         - fromFieldPath: spec.providerConfigRef.name
@@ -143,13 +166,13 @@ spec:
         - fromFieldPath: spec.location
           toFieldPath: spec.forProvider.location
 
+        # Patch common parameters
+        - type: PatchSet
+          patchSetName: common-parameters
+
         # Patch node count
         - fromFieldPath: spec.nodeConfig.nodeCount
           toFieldPath: spec.forProvider.nodeCount
-
-        # Patch node pool configs
-        - type: PatchSet
-          patchSetName: common-parameters
 
         # Patch autoscaling if enabled
         - fromFieldPath: spec.nodeConfig.autoscaling.minNodeCount
