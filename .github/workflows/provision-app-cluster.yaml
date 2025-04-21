@@ -1,0 +1,147 @@
+name: Provision Application Cluster
+
+on:
+  workflow_run:
+    workflows: ["Crossplane Bootstrap"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to provision (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      cluster_name:
+        description: 'Name of the cluster to provision'
+        required: true
+        default: 'app'
+        type: string
+      node_count:
+        description: 'Number of nodes'
+        required: true
+        default: '2'
+        type: string
+      machine_type:
+        description: 'Machine type'
+        required: true
+        default: 'e2-standard-2'
+        type: choice
+        options:
+          - e2-standard-2
+          - e2-standard-4
+          - e2-standard-8
+          - e2-highmem-2
+          - e2-highcpu-4
+
+env:
+  ENVIRONMENT: dev
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  CLUSTER_NAME: app
+
+jobs:
+  provision:
+    name: 'Provision App Cluster'
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "CLUSTER_NAME=${{ github.event.inputs.cluster_name }}" >> $GITHUB_ENV
+          echo "NODE_COUNT=${{ github.event.inputs.node_count }}" >> $GITHUB_ENV
+          echo "MACHINE_TYPE=${{ github.event.inputs.machine_type }}" >> $GITHUB_ENV
+
+      - name: Set default values if not workflow dispatch
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "NODE_COUNT=2" >> $GITHUB_ENV
+          echo "MACHINE_TYPE=e2-standard-2" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Download terraform outputs
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-outputs-${{ env.ENVIRONMENT }}
+          path: ./artifacts
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          cp ./artifacts/kubeconfig $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl get nodes
+
+      - name: Prepare cluster claim
+        run: |
+          # Get the node service account email
+          NODE_SA_EMAIL=$(gcloud iam service-accounts list --filter="displayName:${{ env.ENVIRONMENT }}-gke-node-sa" --format="value(email)")
+          echo "Using node service account: $NODE_SA_EMAIL"
+
+          # Replace placeholder values in cluster claim
+          sed -i "s/your-gcp-project-id/${{ env.GCP_PROJECT_ID }}/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/dev-gke-node-sa@your-gcp-project-id.iam.gserviceaccount.com/$NODE_SA_EMAIL/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/app-cluster/${{ env.CLUSTER_NAME }}-cluster/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/nodeCount: 2/nodeCount: ${{ env.NODE_COUNT }}/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/machineType: e2-standard-2/machineType: ${{ env.MACHINE_TYPE }}/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          
+          # Update labels
+          sed -i "s/name: app/name: ${{ env.CLUSTER_NAME }}/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/environment: dev/environment: ${{ env.ENVIRONMENT }}/g" ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          
+          # Show the final cluster claim
+          cat ./crossplane/xresources/dev-gke-cluster-claim.yaml
+
+      - name: Apply CompositeResourceDefinition and Composition
+        run: |
+          kubectl apply -f ./crossplane/xresources/gke-cluster-definition.yaml
+          kubectl apply -f ./crossplane/compositions/gke-cluster.yaml
+          
+          # Wait for the CRD to be established
+          echo "Waiting for CRD to be established..."
+          kubectl wait --for=condition=established crd/gkeclusters.platform.commercelab.io --timeout=60s
+
+      - name: Provision the application cluster
+        run: |
+          kubectl apply -f ./crossplane/xresources/dev-gke-cluster-claim.yaml
+          
+          # Wait for the cluster to be provisioned
+          echo "Waiting for cluster to be provisioned... this may take up to 15 minutes"
+          kubectl wait --for=condition=ready --timeout=15m gkecluster.platform.commercelab.io/${{ env.CLUSTER_NAME }}-cluster
+
+      - name: Check cluster status
+        run: |
+          kubectl get gkecluster.platform.commercelab.io/${{ env.CLUSTER_NAME }}-cluster -o yaml
+          
+          # Get the GKE cluster details from gcloud
+          echo "Newly provisioned GKE cluster details:"
+          gcloud container clusters list --filter="name:${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }}" --format="table(name,location,currentMasterVersion,currentNodeCount,status)"

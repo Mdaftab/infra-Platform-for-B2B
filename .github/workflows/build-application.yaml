@@ -1,0 +1,77 @@
+name: Build Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workloads/hello-world/app/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'workloads/hello-world/app/**'
+  workflow_dispatch:
+
+env:
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  IMAGE_NAME: hello-world
+
+jobs:
+  build:
+    name: 'Build and Push Image'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Build and push Docker image
+        id: docker_build
+        run: |
+          # Configure docker to use gcloud credential helper
+          gcloud auth configure-docker gcr.io
+          
+          # Get short commit SHA
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          
+          # Build and push docker image
+          cd workloads/hello-world/app
+          TAG="v-${COMMIT_SHORT}-$(date +%Y%m%d%H%M%S)"
+          echo "Building and pushing image: gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${TAG}"
+          docker build -t gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${TAG} .
+          docker push gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${TAG}
+          
+          # Also tag as latest
+          docker tag gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${TAG} gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:latest
+          docker push gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:latest
+          
+          # Output the image tags
+          echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
+          echo "Full image: gcr.io/${GCP_PROJECT_ID}/${IMAGE_NAME}:${TAG}"
+          
+      - name: Update image tag in ArgoCD application
+        run: |
+          # Update the image tag in the hello-world application
+          sed -i "s|value: latest|value: ${IMAGE_TAG}|g" argo-apps/workloads/hello-world-app.yaml
+          sed -i "s|value: latest|value: ${IMAGE_TAG}|g" argo-apps/workloads/multi-cluster-app.yaml
+          
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v4
+        with:
+          commit_message: "Update image tag to ${IMAGE_TAG}"
+          branch: main
+          file_pattern: argo-apps/workloads/*.yaml

@@ -1,0 +1,148 @@
+name: ArgoCD Bootstrap
+
+on:
+  workflow_run:
+    workflows: ["Crossplane Bootstrap"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to bootstrap (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  ENVIRONMENT: dev
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  bootstrap:
+    name: 'Bootstrap ArgoCD'
+    runs-on: ubuntu-latest
+    # Only run if the Crossplane workflow was successful or if this is manually triggered
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Download terraform outputs
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-outputs-${{ env.ENVIRONMENT }}
+          path: ./artifacts
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.2'
+
+      - name: Setup flux
+        uses: fluxcd/flux2/action@main
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          cp ./artifacts/kubeconfig $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl get nodes
+
+      - name: Update Git repository credentials
+        run: |
+          # Replace placeholder values with actual GH_USERNAME and GH_TOKEN
+          # These would typically be stored as GitHub secrets
+          if [[ -n "${{ secrets.GH_USERNAME }}" && -n "${{ secrets.GH_TOKEN }}" ]]; then
+            sed -i "s/your-username/${{ secrets.GH_USERNAME }}/g" crossplane/bootstrap/argocd/git-repo.yaml
+            sed -i "s/YOUR_GITHUB_PAT_OR_PASSWORD/${{ secrets.GH_TOKEN }}/g" crossplane/bootstrap/argocd/git-repo.yaml
+            
+            # Also update the repo URLs in ArgoCD apps
+            find argo-apps -type f -name "*.yaml" -exec sed -i "s/your-username/${{ secrets.GH_USERNAME }}/g" {} \;
+            
+            # Update project ID in app configurations
+            find argo-apps -type f -name "*.yaml" -exec sed -i "s/your-gcp-project-id/${{ env.GCP_PROJECT_ID }}/g" {} \;
+          else
+            echo "::warning::GH_USERNAME or GH_TOKEN secrets not found. Using placeholder values."
+          fi
+
+      - name: Apply ArgoCD bootstrap manifests
+        run: |
+          # Create the namespace first
+          kubectl apply -f crossplane/bootstrap/argocd/namespace.yaml
+          
+          # Apply Helm Repository
+          kubectl apply -f crossplane/bootstrap/argocd/helm-repository.yaml
+          
+          # Wait for the Helm Repository to be ready
+          kubectl wait --for=condition=ready --timeout=60s helmrepository/argo-helm -n argocd
+          
+          # Apply ArgoCD Helm Release
+          kubectl apply -f crossplane/bootstrap/argocd/argocd-install.yaml
+          
+          # Wait for ArgoCD to be ready (this may take a few minutes)
+          echo "Waiting for ArgoCD to be ready..."
+          kubectl wait --for=condition=ready --timeout=300s helmrelease/argocd -n argocd
+          
+          # Apply Git repository credentials
+          kubectl apply -f crossplane/bootstrap/argocd/git-repo.yaml
+
+      - name: Apply ArgoCD Application for Crossplane Resources
+        run: |
+          # Apply the ArgoCD Application for Crossplane resources
+          kubectl apply -f argo-apps/crossplane/crossplane-app.yaml
+          
+          # Wait for the Application to be created
+          echo "Waiting for Crossplane Application to be created..."
+          kubectl wait --for=condition=created --timeout=60s application.argoproj.io/crossplane-resources -n argocd
+
+      - name: Get ArgoCD admin password
+        run: |
+          ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+          echo "ArgoCD initial admin password: $ARGOCD_PASSWORD"
+          echo "::warning::Please save this password to access the ArgoCD UI. This will only be shown once."
+
+      - name: Get ArgoCD URL
+        run: |
+          # If using port-forward
+          echo "To access ArgoCD UI, run: kubectl port-forward svc/argocd-server -n argocd 8080:80"
+          echo "Then open http://localhost:8080 in your browser"
+          
+          # If using LoadBalancer
+          if kubectl get svc/argocd-server -n argocd -o jsonpath='{.spec.type}' | grep -q LoadBalancer; then
+            ARGOCD_IP=$(kubectl get svc/argocd-server -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$ARGOCD_IP" ]]; then
+              echo "ArgoCD UI is available at: http://$ARGOCD_IP"
+            else
+              echo "Waiting for ArgoCD LoadBalancer IP to be assigned..."
+            fi
+          fi

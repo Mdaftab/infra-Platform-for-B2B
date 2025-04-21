@@ -1,0 +1,121 @@
+name: Terraform Infrastructure Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-infra.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-infra.yaml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  TERRAFORM_VERSION: '1.5.7'
+  GOOGLE_PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+  GCS_BUCKET: ${{ secrets.GCP_TERRAFORM_STATE_BUCKET }}
+
+jobs:
+  terraform:
+    name: 'Terraform Infrastructure'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+      - name: Set default environment
+        if: github.event_name != 'workflow_dispatch'
+        run: echo "ENVIRONMENT=dev" >> $GITHUB_ENV
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Configure GCS backend
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: |
+          # Replace placeholder values in backend.tf
+          sed -i "s/your-terraform-state-bucket/${{ env.GCS_BUCKET }}/g" backend.tf
+          sed -i "s/your-gcp-project-id/${{ env.GOOGLE_PROJECT }}/g" variables.tf
+
+      - name: Terraform Init
+        id: init
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: terraform init
+
+      - name: Terraform Format Check
+        id: fmt
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: terraform fmt -check
+        continue-on-error: true
+
+      - name: Terraform Validate
+        id: validate
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: terraform plan -out=tfplan -input=false
+        continue-on-error: true
+
+      - name: Upload Terraform plan
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-plan-${{ env.ENVIRONMENT }}
+          path: ./infra/environments/${{ env.ENVIRONMENT }}/tfplan
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      - name: Terraform Apply
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        working-directory: ./infra/environments/${{ env.ENVIRONMENT }}
+        run: terraform apply -input=false tfplan
+
+      - name: Upload Terraform outputs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-outputs-${{ env.ENVIRONMENT }}
+          path: |
+            ./infra/environments/${{ env.ENVIRONMENT }}/kubeconfig
+            ./infra/environments/${{ env.ENVIRONMENT }}/crossplane-sa-key.json

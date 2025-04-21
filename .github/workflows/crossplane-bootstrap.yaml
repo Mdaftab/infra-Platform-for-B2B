@@ -1,0 +1,130 @@
+name: Crossplane Bootstrap
+
+on:
+  workflow_run:
+    workflows: ["Terraform Infrastructure Deployment"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to bootstrap (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  ENVIRONMENT: dev
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  bootstrap:
+    name: 'Bootstrap Crossplane'
+    runs-on: ubuntu-latest
+    # Only run if the Terraform workflow was successful or if this is manually triggered
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Download terraform outputs
+        uses: actions/download-artifact@v3
+        with:
+          name: terraform-outputs-${{ env.ENVIRONMENT }}
+          path: ./artifacts
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.2'
+
+      - name: Setup flux
+        uses: fluxcd/flux2/action@main
+
+      - name: Configure kubectl
+        run: |
+          mkdir -p $HOME/.kube
+          cp ./artifacts/kubeconfig $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+          kubectl get nodes
+
+      - name: Install Flux bootstrap components
+        run: |
+          flux install \
+            --namespace=flux-system \
+            --components=source-controller,helm-controller \
+            --network-policy=false \
+            --log-level=info
+
+      - name: Create GCP credentials secret
+        run: |
+          kubectl create namespace crossplane-system --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic gcp-creds \
+            -n crossplane-system \
+            --from-file=credentials.json=./artifacts/crossplane-sa-key.json \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Crossplane bootstrap manifests
+        run: |
+          # Apply Helm Repository first
+          kubectl apply -f ./crossplane/bootstrap/namespace.yaml
+          kubectl apply -f ./crossplane/bootstrap/helm-repository.yaml
+          
+          # Wait for the Helm Repository to be ready
+          kubectl wait --for=condition=ready --timeout=60s helmrepository/crossplane-stable -n crossplane-system
+          
+          # Apply Crossplane Helm Release
+          kubectl apply -f ./crossplane/bootstrap/crossplane-helm-release.yaml
+          
+          # Wait for Crossplane to be ready (this may take a few minutes)
+          echo "Waiting for Crossplane to be ready..."
+          kubectl wait --for=condition=ready --timeout=300s helmrelease/crossplane -n crossplane-system
+          
+          # Apply Providers
+          kubectl apply -f ./crossplane/bootstrap/providers.yaml
+          
+          # Wait for providers to be installed
+          echo "Waiting for providers to be installed and ready..."
+          kubectl wait --for=condition=healthy --timeout=300s provider.pkg.crossplane.io/provider-gcp -n crossplane-system
+          kubectl wait --for=condition=healthy --timeout=300s provider.pkg.crossplane.io/provider-kubernetes -n crossplane-system
+          
+          # Replace project ID in provider config
+          sed "s/\${PROJECT_ID}/${{ env.GCP_PROJECT_ID }}/g" ./crossplane/bootstrap/provider-configs/gcp-provider-config.yaml | kubectl apply -f -
+          kubectl apply -f ./crossplane/bootstrap/provider-configs/k8s-provider-config.yaml
+
+      - name: Verify Crossplane installation
+        run: |
+          kubectl get deployments -n crossplane-system
+          kubectl get providers -n crossplane-system
+          kubectl get providerconfig -A

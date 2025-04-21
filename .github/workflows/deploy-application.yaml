@@ -1,0 +1,198 @@
+name: Deploy Application
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'workloads/**'
+      - '.github/workflows/deploy-application.yaml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to (dev, staging, prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      cluster_name:
+        description: 'Name of the target cluster'
+        required: true
+        default: 'app'
+        type: string
+      release_name:
+        description: 'Helm release name'
+        required: true
+        default: 'hello-world'
+        type: string
+
+env:
+  ENVIRONMENT: dev
+  CLUSTER_NAME: app
+  RELEASE_NAME: hello-world
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+
+jobs:
+  deploy:
+    name: 'Deploy Application'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set environment from workflow dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "ENVIRONMENT=${{ github.event.inputs.environment }}" >> $GITHUB_ENV
+          echo "CLUSTER_NAME=${{ github.event.inputs.cluster_name }}" >> $GITHUB_ENV
+          echo "RELEASE_NAME=${{ github.event.inputs.release_name }}" >> $GITHUB_ENV
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          create_credentials_file: true
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          install_components: 'gke-gcloud-auth-plugin'
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.2'
+
+      - name: Get GKE credentials
+        run: |
+          gcloud container clusters get-credentials ${{ env.ENVIRONMENT }}-${{ env.CLUSTER_NAME }} --region us-central1
+          kubectl get nodes
+
+      - name: Build and push Docker image
+        id: docker_build
+        run: |
+          # Create a simple hello-world Go application in a temporary directory
+          mkdir -p /tmp/hello-world
+          cat << EOF > /tmp/hello-world/main.go
+          package main
+          
+          import (
+              "fmt"
+              "log"
+              "net/http"
+              "os"
+          )
+          
+          func main() {
+              http.HandleFunc("/", helloWorld)
+              http.HandleFunc("/health", healthCheck)
+          
+              port := getEnv("PORT", "8080")
+              log.Printf("Server starting on port %s\\n", port)
+              if err := http.ListenAndServe(fmt.Sprintf(":%s", port), nil); err != nil {
+                  log.Fatal(err)
+              }
+          }
+          
+          func helloWorld(w http.ResponseWriter, r *http.Request) {
+              log.Printf("Received request for %s from %s", r.URL.Path, r.RemoteAddr)
+              hostname, _ := os.Hostname()
+              fmt.Fprintf(w, "Hello, World from %s! Welcome to ${{ env.ENVIRONMENT }} environment.\\n", hostname)
+          }
+          
+          func healthCheck(w http.ResponseWriter, r *http.Request) {
+              w.WriteHeader(http.StatusOK)
+              fmt.Fprintf(w, "OK")
+          }
+          
+          func getEnv(key, fallback string) string {
+              value, exists := os.LookupEnv(key)
+              if !exists {
+                  value = fallback
+              }
+              return value
+          }
+          EOF
+          
+          cat << EOF > /tmp/hello-world/Dockerfile
+          FROM golang:1.21-alpine AS builder
+          
+          WORKDIR /app
+          COPY main.go .
+          
+          RUN go mod init hello-world && \
+              go mod tidy && \
+              CGO_ENABLED=0 GOOS=linux go build -o hello-world .
+          
+          FROM alpine:3.19
+          
+          WORKDIR /app
+          COPY --from=builder /app/hello-world .
+          
+          EXPOSE 8080
+          
+          CMD ["/app/hello-world"]
+          EOF
+          
+          # Configure docker to use gcloud credential helper
+          gcloud auth configure-docker gcr.io
+          
+          # Build and push docker image
+          cd /tmp/hello-world
+          TAG=v1.0.0-$(date +%Y%m%d%H%M%S)
+          echo "Building and pushing image: gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:${TAG}"
+          docker build -t gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:${TAG} .
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:${TAG}
+          
+          # Also tag as latest
+          docker tag gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:${TAG} gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:latest
+          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world:latest
+          
+          # Save the tag for later
+          echo "IMAGE_TAG=${TAG}" >> $GITHUB_ENV
+
+      - name: Deploy application with Helm
+        run: |
+          # Update values.yaml with project ID and image tag
+          sed -i "s/your-gcp-project-id/${{ env.GCP_PROJECT_ID }}/g" ./workloads/hello-world/values.yaml
+          sed -i "s/tag: latest/tag: ${{ env.IMAGE_TAG }}/g" ./workloads/hello-world/values.yaml
+          sed -i "s/environment: dev/environment: ${{ env.ENVIRONMENT }}/g" ./workloads/hello-world/values.yaml
+          
+          # Show the configured values
+          echo "Using the following Helm values:"
+          cat ./workloads/hello-world/values.yaml
+          
+          # Check if release already exists
+          if helm status ${{ env.RELEASE_NAME }} -n default 2>/dev/null; then
+            # Upgrade existing release
+            helm upgrade ${{ env.RELEASE_NAME }} ./workloads/hello-world \
+              --namespace default \
+              --set image.repository=gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world \
+              --set image.tag=${{ env.IMAGE_TAG }}
+          else
+            # Install new release
+            helm install ${{ env.RELEASE_NAME }} ./workloads/hello-world \
+              --namespace default \
+              --create-namespace \
+              --set image.repository=gcr.io/${{ env.GCP_PROJECT_ID }}/hello-world \
+              --set image.tag=${{ env.IMAGE_TAG }}
+          fi
+          
+          # Wait for deployment to complete
+          kubectl rollout status deployment/${{ env.RELEASE_NAME }} -n default --timeout=120s
+
+      - name: Show application status
+        run: |
+          kubectl get deployment,svc,ingress -n default -l app.kubernetes.io/instance=${{ env.RELEASE_NAME }}
