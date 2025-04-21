@@ -1,0 +1,91 @@
+name: Deploy Application to Dev Cluster
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Provision Dev GKE Cluster"]
+    types:
+      - completed
+
+jobs:
+  deploy-app:
+    name: Build and Deploy Application
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.25.0'
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.11.2'
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          export_default_credentials: true
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker
+
+      - name: Download Dev Cluster Kubeconfig
+        uses: actions/download-artifact@v3
+        with:
+          name: dev-cluster-kubeconfig
+          path: ./tmp
+
+      - name: Set KUBECONFIG Environment Variable
+        run: |
+          echo "KUBECONFIG=$(pwd)/tmp/dev-cluster-kubeconfig.yaml" >> $GITHUB_ENV
+          chmod 600 $(pwd)/tmp/dev-cluster-kubeconfig.yaml
+
+      - name: Build and Push Container Image
+        working-directory: workloads/hello-world/app
+        run: |
+          IMAGE_NAME="gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world:${{ github.sha }}"
+          docker build -t $IMAGE_NAME .
+          docker push $IMAGE_NAME
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+      - name: Update Helm Values
+        working-directory: workloads/hello-world
+        run: |
+          # Update image repository and tag in values.yaml
+          sed -i "s|repository:.*|repository: gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world|" values.yaml
+          sed -i "s|tag:.*|tag: ${{ github.sha }}|" values.yaml
+
+      - name: Deploy Application using Helm
+        working-directory: workloads/hello-world
+        run: |
+          # Create namespace if it doesn't exist
+          kubectl create namespace hello-world --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Install/upgrade Helm chart
+          helm upgrade --install hello-world . -n hello-world
+
+      - name: Wait for Deployment
+        run: |
+          kubectl wait --for=condition=available deployment/hello-world --timeout=300s -n hello-world
+          
+          # Get service details
+          echo "Application deployed successfully!"
+          kubectl get svc -n hello-world
+          
+          # If LoadBalancer is used, get external IP
+          if kubectl get svc hello-world -n hello-world -o jsonpath='{.spec.type}' | grep -q 'LoadBalancer'; then
+            echo "Waiting for external IP..."
+            while [ -z $(kubectl get svc hello-world -n hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) ]; do
+              sleep 10
+            done
+            EXTERNAL_IP=$(kubectl get svc hello-world -n hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            echo "Application is accessible at: http://$EXTERNAL_IP"
+          fi

@@ -1,222 +1,71 @@
-# Cloud-Native Infrastructure with Terraform, Crossplane, and GitOps
+# Multi-Cluster Kubernetes Management Platform
 
-This repository contains a production-grade cloud infrastructure setup using Terraform for base infrastructure, Crossplane for Kubernetes-native infrastructure provisioning, and ArgoCD for GitOps-based application deployment on Google Cloud Platform.
+A modern Kubernetes infrastructure management solution using Terraform, Crossplane, and GitHub Actions to implement a multi-cluster Kubernetes environment on Google Cloud Platform.
 
 ## Architecture Overview
 
-This architecture implements a modern, GitOps-driven cloud infrastructure with three clearly separated layers:
+This platform implements a GitOps-driven infrastructure management approach with two clearly separated layers:
 
-1. **Base Infrastructure Layer (Terraform)**
-   - Custom VPC with public and private subnets
-   - IAM service accounts with proper RBAC
-   - GCP API enablement
-   - Base GKE cluster to host Crossplane Controller and ArgoCD
+1. **Infrastructure Layer (Terraform + Crossplane)**
+   - Small, efficient "infracluster" GKE cluster provisioned with Terraform
+   - Crossplane running on the infracluster to manage additional GKE clusters
+   - GitHub Actions workflows for automation
+   - Infrastructure-as-Code principles throughout
 
-2. **Infrastructure Controller Layer (Crossplane)**
-   - Crossplane running on the base GKE cluster
-   - Custom resource definitions for GKE clusters
-   - Declarative API for provisioning application-specific GKE clusters
-   - Multi-environment support (dev, staging, prod)
-
-3. **Application Deployment Layer (ArgoCD)**
-   - ArgoCD for GitOps-based deployments
-   - Declarative application definitions in Git
-   - Automatic sync from Git to Kubernetes 
-   - Multi-cluster deployment through ApplicationSets
-
-## Architecture Diagram
+2. **Application Layer**
+   - Application GKE clusters ("devcluster") provisioned by Crossplane
+   - Standardized cluster configuration
+   - Sample application deployment
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                           │
-│                               GitHub Repository                                           │
-│                                                                                           │
-│  ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐   │
-│  │  Terraform      │   │  Crossplane     │   │  ArgoCD         │   │  Application    │   │
-│  │  Infrastructure │   │  Bootstrap      │   │  Bootstrap      │   │  Build          │   │
-│  │  Workflow       │   │  Workflow       │   │  Workflow       │   │  Workflow       │   │
-│  └────────┬────────┘   └────────┬────────┘   └────────┬────────┘   └────────┬────────┘   │
-│           │                     │                     │                     │            │
-└───────────┼─────────────────────┼─────────────────────┼─────────────────────┼────────────┘
-            │                     │                     │                     │
-            ▼                     │                     │                     │
-┌───────────────────────┐         │                     │                     │
-│                       │         │                     │                     │
-│  Google Cloud         │         │                     │                     │
-│  Platform             │         │                     │                     │
-│                       │         │                     │                     │
-│  ┌───────────────┐    │         │                     │                     │
-│  │ IAM Service   │    │         │                     │                     │
-│  │ Accounts      │    │         │                     │                     │
-│  └───────────────┘    │         │                     │                     │
-│                       │         │                     │                     │
-│  ┌───────────────┐    │         │                     │                     │
-│  │ GCS Buckets   │    │         │                     │                     │
-│  │ (TF State)    │    │         │                     │                     │
-│  └───────────────┘    │         │                     │                     │
-│                       │         │                     │                     │
-│  ┌───────────────┐    │         │                     │                     │
-│  │ GCP APIs &    │    │         │                     │                     │
-│  │ Services      │◄───┘         │                     │                     │
-│  └───────────────┘              │                     │                     │
-│                                 │                     │                     │
-│  ┌───────────────────┐          │                     │                     │
-│  │ VPC Network       │          │                     │                     │
-│  │                   │          │                     │                     │
-│  │ ┌─────────────┐   │          │                     │                     │
-│  │ │Public Subnet│   │          │                     │                     │
-│  │ └─────────────┘   │          │                     │                     │
-│  │                   │          │                     │                     │
-│  │ ┌─────────────┐   │          │                     │                     │
-│  │ │Private      │   │          │                     │                     │
-│  │ │Subnet       │   │          │                     │                     │
-│  │ └─────────────┘   │          │                     │                     │
-│  └───────────────────┘          │                     │                     │
-│                                 │                     │                     │
-│  ┌───────────────────┐          │                     │                     │
-│  │ GKE Management    │          │                     │                     │
-│  │ Cluster           │◄─────────┘                     │                     │
-│  │                   │                                │                     │
-│  │ ┌─────────────┐   │                                │                     │
-│  │ │Crossplane   │   │                                │                     │
-│  │ │Operators    │───┼────────────────────┐           │                     │
-│  │ └─────────────┘   │                    │           │                     │
-│  │                   │                    │           │                     │
-│  │ ┌─────────────┐   │                    │           │                     │
-│  │ │ArgoCD       │◄──┼────────────────────┼───────────┼─────────────────┐  │
-│  │ │             │   │                    │           │                 │  │
-│  │ └─────────────┘   │                    │           │                 │  │
-│  │                   │                    │           │                 │  │
-│  └───────────────────┘                    │           │                 │  │
-│                                           │           │                 │  │
-│  ┌───────────────────┐                    │           │                 │  │
-│  │ GKE Application   │                    │           │                 │  │
-│  │ Clusters          │◄───────────────────┘           │                 │  │
-│  │                   │                                │                 │  │
-│  │ ┌─────────────┐   │                                │                 │  │
-│  │ │Hello World  │◄──┼────────────────────────────────┼─────────────────┘  │
-│  │ │Application  │   │                                │                    │
-│  │ └─────────────┘   │                                │                    │
-│  │                   │                                │                    │
-│  │ ┌─────────────┐   │                                │                    │
-│  │ │Container    │◄──┼────────────────────────────────┘                    │
-│  │ │Registry     │   │                                                     │
-│  │ └─────────────┘   │                                                     │
-│  │                   │                                                     │
-│  └───────────────────┘                                                     │
-│                                                                            │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-## GitOps Flow Diagram
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                          │
-│                                    GitOps Process Flow                                   │
-│                                                                                          │
-├──────────────┬──────────────────┬─────────────────────┬───────────────────┬─────────────┤
-│              │                  │                     │                   │             │
-│  Developer   │    GitHub        │   Management        │  App Cluster      │  Container  │
-│  Workflow    │    Actions       │   Cluster           │  (Created by      │  Registry   │
-│              │                  │                     │   Crossplane)     │             │
-├──────────────┼──────────────────┼─────────────────────┼───────────────────┼─────────────┤
-│              │                  │                     │                   │             │
-│   Code       │                  │                     │                   │             │
-│   Changes    │                  │                     │                   │             │
-│      │       │                  │                     │                   │             │
-│      ▼       │                  │                     │                   │             │
-│   Git Push   │                  │                     │                   │             │
-│      │       │                  │                     │                   │             │
-│      └──────►│  Terraform       │                     │                   │             │
-│              │  Workflow        │                     │                   │             │
-│              │  Triggered       │                     │                   │             │
-│              │      │           │                     │                   │             │
-│              │      ▼           │                     │                   │             │
-│              │  Create/Update   │                     │                   │             │
-│              │  Base Infra      │                     │                   │             │
-│              │      │           │                     │                   │             │
-│              │      └──────────►│  Management GKE     │                   │             │
-│              │                  │  Cluster Created    │                   │             │
-│              │                  │      │              │                   │             │
-│              │                  │      │              │                   │             │
-│              │  Crossplane      │      │              │                   │             │
-│              │  Bootstrap       │      │              │                   │             │
-│              │  Workflow        │      │              │                   │             │
-│              │  Triggered       │      │              │                   │             │
-│              │      │           │      │              │                   │             │
-│              │      ▼           │      │              │                   │             │
-│              │  Install         │      │              │                   │             │
-│              │  Crossplane      │      │              │                   │             │
-│              │      │           │      │              │                   │             │
-│              │      └──────────►│  Crossplane         │                   │             │
-│              │                  │  Running            │                   │             │
-│              │                  │      │              │                   │             │
-│              │  ArgoCD          │      │              │                   │             │
-│              │  Bootstrap       │      │              │                   │             │
-│              │  Workflow        │      │              │                   │             │
-│              │  Triggered       │      │              │                   │             │
-│              │      │           │      │              │                   │             │
-│              │      ▼           │      │              │                   │             │
-│              │  Install         │      │              │                   │             │
-│              │  ArgoCD          │      │              │                   │             │
-│              │      │           │      │              │                   │             │
-│              │      └──────────►│  ArgoCD             │                   │             │
-│              │                  │  Running            │                   │             │
-│              │                  │      │              │                   │             │
-│              │                  │      │              │                   │             │
-│              │                  │      ▼              │                   │             │
-│              │                  │  ArgoCD watches     │                   │             │
-│              │                  │  Git repository     │                   │             │
-│              │                  │  for Crossplane     │                   │             │
-│              │                  │  resources          │                   │             │
-│              │                  │      │              │                   │             │
-│              │                  │      ▼              │                   │             │
-│              │                  │  Crossplane         │                   │             │
-│              │                  │  Provisions         │                   │             │
-│              │                  │  App Cluster        │                   │             │
-│              │                  │      │              │                   │             │
-│              │                  │      └──────────────┼──► App Cluster    │             │
-│              │                  │                     │    Created        │             │
-│              │                  │                     │      │            │             │
-│              │  Register        │                     │      │            │             │
-│              │  App Cluster     │                     │      │            │             │
-│              │  Workflow        │                     │      │            │             │
-│              │  Triggered       │                     │      │            │             │
-│              │      │           │                     │      │            │             │
-│              │      ▼           │                     │      │            │             │
-│              │  Register        │                     │      │            │             │
-│              │  Cluster with    │                     │      │            │             │
-│              │  ArgoCD          │                     │      │            │             │
-│              │      │           │                     │      │            │             │
-│              │      └──────────►│  ArgoCD knows       │      │            │             │
-│              │                  │  about App          │      │            │             │
-│              │                  │  Cluster           ─┼──────┼───────────►│             │
-│              │                  │                     │      │            │             │
-│              │  Build           │                     │      │            │             │
-│              │  Application     │                     │      │            │             │
-│              │  Workflow        │                     │      │            │             │
-│              │  Triggered       │                     │      │            │             │
-│              │      │           │                     │      │            │             │
-│              │      ▼           │                     │      │            │             │
-│              │  Build &         │                     │      │            │             │
-│              │  Push Image      │                     │      │            │             │
-│              │      │           │                     │      │            │             │
-│              │      └───────────┼─────────────────────┼──────┼───────────►│  Container  │
-│              │                  │                     │      │            │  Image      │
-│              │  Update          │                     │      │            │  Stored     │
-│              │  ArgoCD App      │                     │      │            │     │       │
-│              │  Definitions     │                     │      │            │     │       │
-│              │      │           │                     │      │            │     │       │
-│              │      └──────────►│  ArgoCD detects     │      │            │     │       │
-│              │                  │  Changes            │      │            │     │       │
-│              │                  │      │              │      │            │     │       │
-│              │                  │      └──────────────┼──────┼────────────┼─────┘       │
-│              │                  │                     │      ▼            │             │
-│              │                  │                     │  App Deployed     │             │
-│              │                  │                     │  and Running      │             │
-│              │                  │                     │                   │             │
-└──────────────┴──────────────────┴─────────────────────┴───────────────────┴─────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                                                                             │
+│                               GitHub Repository                             │
+│                                                                             │
+│  ┌───────────────┐   ┌───────────────┐   ┌───────────────┐                  │
+│  │  Terraform    │   │  Crossplane   │   │  Application  │                  │
+│  │  Workflow     │   │  Workflow     │   │  Workflow     │                  │
+│  └───────┬───────┘   └───────┬───────┘   └───────┬───────┘                  │
+│          │                   │                   │                          │
+└──────────┼───────────────────┼───────────────────┼──────────────────────────┘
+           │                   │                   │
+           ▼                   │                   │
+┌──────────────────┐           │                   │
+│                  │           │                   │
+│  Google Cloud    │           │                   │
+│  Platform        │           │                   │
+│                  │           │                   │
+│  ┌────────────┐  │           │                   │
+│  │ IAM        │  │           │                   │
+│  │ Service    │  │           │                   │
+│  │ Accounts   │  │           │                   │
+│  └────────────┘  │           │                   │
+│                  │           │                   │
+│  ┌────────────┐  │           │                   │
+│  │ VPC        │  │           │                   │
+│  │ Network    │  │           │                   │
+│  └────────────┘  │           │                   │
+│                  │           │                   │
+│  ┌────────────┐  │           │                   │
+│  │Infracluster│◄─┼───────────┘                   │
+│  │            │  │                               │
+│  │┌──────────┐│  │                               │
+│  ││Crossplane││  │                               │
+│  │└────┬─────┘│  │                               │
+│  └─────┼──────┘  │                               │
+│        │         │                               │
+│        ▼         │                               │
+│  ┌────────────┐  │                               │
+│  │ Dev GKE    │◄─┼───────────────────────────────┘
+│  │ Cluster    │  │
+│  │            │  │
+│  │┌──────────┐│  │
+│  ││Hello     ││  │
+│  ││World App ││  │
+│  │└──────────┘│  │
+│  └────────────┘  │
+│                  │
+└──────────────────┘
 ```
 
 ## Repository Structure
@@ -224,47 +73,42 @@ This architecture implements a modern, GitOps-driven cloud infrastructure with t
 ```
 lab_commercelab/
 ├── .github/workflows/                # GitHub Actions workflows
-│   ├── terraform-infra.yaml             # Deploy Terraform infrastructure
-│   ├── crossplane-bootstrap.yaml        # Bootstrap Crossplane on base cluster
-│   ├── argocd-bootstrap.yaml            # Bootstrap ArgoCD on base cluster
-│   ├── register-app-clusters.yaml       # Register new clusters with ArgoCD
-│   └── build-application.yaml           # Build and push application images
-├── argo-apps/                        # ArgoCD application definitions
-│   ├── crossplane/                      # Crossplane resource applications
-│   │   └── crossplane-app.yaml          # Application for Crossplane resources
-│   └── workloads/                       # Application workload definitions
-│       ├── hello-world-app.yaml         # Single cluster application
-│       └── multi-cluster-app.yaml       # Multi-cluster application set
+│   ├── terraform-infra.yaml          # Deploy Terraform infrastructure
+│   ├── crossplane-bootstrap.yaml     # Bootstrap Crossplane on infracluster
+│   ├── provision-dev-cluster.yaml    # Provision dev GKE cluster with Crossplane
+│   └── deploy-app.yaml               # Deploy application to dev cluster
 ├── infra/                            # Terraform infrastructure code
-│   ├── modules/                         # Reusable Terraform modules
-│   │   ├── vpc/                         # VPC network module
-│   │   ├── gke/                         # GKE cluster module
-│   │   ├── iam/                         # IAM service accounts module
-│   │   └── apis/                        # GCP API enablement module
-│   └── environments/                    # Environment-specific configurations
-│       └── dev/                         # Development environment
+│   ├── modules/                      # Reusable Terraform modules
+│   │   ├── vpc/                      # VPC network module
+│   │   ├── gke/                      # GKE cluster module
+│   │   ├── iam/                      # IAM service accounts module
+│   │   └── apis/                     # GCP API enablement module
+│   └── environments/                 # Environment-specific configurations
+│       └── dev/                      # Development environment
 ├── crossplane/                       # Crossplane configurations
-│   ├── bootstrap/                       # Bootstrap manifests
-│   │   ├── namespace.yaml               # Crossplane namespace
-│   │   ├── helm-repository.yaml         # Crossplane Helm repo
+│   ├── bootstrap/                    # Bootstrap manifests
+│   │   ├── namespace.yaml            # Crossplane namespace
+│   │   ├── helm-repository.yaml      # Crossplane Helm repo
 │   │   ├── crossplane-helm-release.yaml # Crossplane Helm release
-│   │   ├── providers.yaml               # Crossplane providers
-│   │   ├── provider-configs/            # Provider configurations
-│   │   └── argocd/                      # ArgoCD installation manifests
-│   ├── compositions/                    # XRM compositions
-│   │   └── gke-cluster.yaml             # GKE cluster composition
-│   └── xresources/                      # Custom resource definitions & claims
-│       ├── gke-cluster-definition.yaml  # GKE cluster XRD
-│       └── dev-gke-cluster-claim.yaml   # Dev GKE cluster claim
-└── workloads/                        # Application workloads
-    └── hello-world/                     # Hello World application
-        ├── app/                         # Application source code
-        │   ├── main.go                  # Go application
-        │   ├── go.mod                   # Go module file
-        │   └── Dockerfile               # Container image definition
-        ├── Chart.yaml                   # Helm chart metadata
-        ├── values.yaml                  # Helm chart values
-        └── templates/                   # Helm chart templates
+│   │   ├── providers.yaml            # Crossplane providers
+│   │   └── provider-configs/         # Provider configurations
+│   ├── compositions/                 # XRM compositions
+│   │   └── gke-cluster.yaml          # GKE cluster composition
+│   └── xresources/                   # Custom resource definitions & claims
+│       ├── gke-cluster-definition.yaml # GKE cluster XRD
+│       └── dev-gke-cluster-claim.yaml # Dev GKE cluster claim
+├── workloads/                        # Application workloads
+│   └── hello-world/                  # Hello World application
+│       ├── app/                      # Application source code
+│       │   ├── main.go               # Go application
+│       │   ├── go.mod                # Go module file
+│       │   └── Dockerfile            # Container image definition
+│       ├── Chart.yaml                # Helm chart metadata
+│       ├── values.yaml               # Helm chart values
+│       └── templates/                # Helm chart templates
+└── scripts/                          # Utility scripts
+    ├── setup.sh                      # Setup script for GCP resources
+    └── cleanup.sh                    # Cleanup script for GCP resources
 ```
 
 ## Prerequisites
@@ -273,303 +117,178 @@ lab_commercelab/
 - GitHub repository with secrets configured
 - Local development tools:
   - `gcloud` CLI (authenticated to your GCP project)
-  - `terraform` CLI (v1.0+)
   - `kubectl` CLI
-  - `helm` CLI
+  - `helm` CLI (optional for local development)
 
-## Required Placeholder Replacements
+## Quick Start
 
-Before deploying, you **MUST** replace these placeholder values with your actual configuration:
+### 1. Set Up Cloud Resources
 
-| File | Placeholder | Replace With | Description |
-|------|-------------|-------------|-------------|
-| **Terraform Base Infrastructure** |
-| `infra/environments/dev/variables.tf` | `your-gcp-project-id` (line 3) | Your GCP project ID | The GCP project where all resources will be created |
-| `infra/environments/dev/backend.tf` | `your-terraform-state-bucket` (line 3) | Your GCS bucket name | GCS bucket for storing Terraform state |
-| **Crossplane Configuration** |
-| `crossplane/bootstrap/provider-configs/gcp-provider-config.yaml` | `${PROJECT_ID}` (line 7) | Your GCP project ID | **Note**: This will be replaced automatically by the GitHub workflow |
-| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `your-gcp-project-id` (line 12) | Your GCP project ID | Used for Crossplane to provision GKE |
-| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `dev-gke-node-sa@your-gcp-project-id.iam.gserviceaccount.com` (line 30) | Your specific service account | **Note**: This will be replaced automatically by the GitHub workflow |
-| **ArgoCD Configuration** |
-| `crossplane/bootstrap/argocd/git-repo.yaml` | `your-username` | Your GitHub username | For ArgoCD to access your repository |
-| `crossplane/bootstrap/argocd/git-repo.yaml` | `YOUR_GITHUB_PAT_OR_PASSWORD` | Your GitHub token | Personal access token with repo scope |
-| `argo-apps/crossplane/crossplane-app.yaml` | `your-username` | Your GitHub username | For ArgoCD application definition |
-| `argo-apps/workloads/hello-world-app.yaml` | `your-username` | Your GitHub username | For ArgoCD application definition |
-| `argo-apps/workloads/multi-cluster-app.yaml` | `your-username` | Your GitHub username | For ArgoCD application definition |
-| **Application Deployment** |
-| `workloads/hello-world/values.yaml` | `gcr.io/your-gcp-project-id/hello-world` (line 5) | Your GCR image path | Where your container images will be stored |
-| **GitHub Secrets** |
-| GitHub repository | N/A | Create secrets | Add `GCP_PROJECT_ID`, `GCP_SA_KEY`, `GCP_TERRAFORM_STATE_BUCKET`, `GH_USERNAME`, and `GH_TOKEN` |
+Run the provided setup script to create required GCP resources:
 
-## Getting Started
+```bash
+./scripts/setup.sh
+```
 
-### Step 1: Configure GitHub Secrets
+This script will:
+1. Enable required GCP APIs
+2. Create a service account for GitHub Actions
+3. Create a GCS bucket for Terraform state
+4. Provide instructions for GitHub secrets
+
+### 2. Configure GitHub Secrets
 
 Add the following secrets to your GitHub repository:
 
 - `GCP_PROJECT_ID`: Your GCP project ID
-- `GCP_SA_KEY`: Base64-encoded service account key JSON with necessary permissions
-- `GCP_TERRAFORM_STATE_BUCKET`: GCS bucket name for Terraform state
-- `GH_USERNAME`: Your GitHub username
-- `GH_TOKEN`: Your GitHub personal access token (with repo scope)
+- `GCP_SA_KEY`: Base64-encoded service account key (provided by the setup script)
+- `GCP_TERRAFORM_STATE_BUCKET`: GCS bucket name for Terraform state (provided by the setup script)
 
-To create a service account and key:
+### 3. Deploy Infrastructure
 
-```bash
-# Create service account
-gcloud iam service-accounts create github-actions-sa \
-  --display-name="GitHub Actions Service Account"
+The project uses GitHub Actions workflows for deployment. The workflows are triggered in sequence:
 
-# Grant necessary permissions
-gcloud projects add-iam-policy-binding your-gcp-project-id \
-  --member="serviceAccount:github-actions-sa@your-gcp-project-id.iam.gserviceaccount.com" \
-  --role="roles/owner"
+1. **Terraform Infrastructure Deployment**
+   - Deploys the VPC, IAM, and infracluster GKE
 
-# Create and download key
-gcloud iam service-accounts keys create key.json \
-  --iam-account=github-actions-sa@your-gcp-project-id.iam.gserviceaccount.com
+2. **Crossplane Bootstrap**
+   - Installs Crossplane on the infracluster
+   - Configures Crossplane providers and permissions
 
-# Base64 encode the key for GitHub secret
-cat key.json | base64
-```
+3. **Provision Dev Cluster**
+   - Uses Crossplane to provision the dev GKE cluster
 
-To create a GCS bucket for Terraform state:
+4. **Deploy Application**
+   - Builds and deploys the sample application to the dev cluster
 
-```bash
-gsutil mb -l us-central1 gs://your-terraform-state-bucket
-gsutil versioning set on gs://your-terraform-state-bucket
-```
-
-### Step 2: GitHub Actions Workflow Deployment
-
-The project includes several interdependent GitHub Actions workflows that make up the GitOps pipeline:
-
-#### 1. Terraform Infrastructure Deployment
-
-This workflow deploys the base infrastructure:
-- Custom VPC network
-- IAM service accounts
-- GCP API enablement
-- Base GKE cluster for Crossplane and ArgoCD
-
-To run:
+To start the deployment:
 1. Go to the Actions tab in your GitHub repository
 2. Select "Terraform Infrastructure Deployment"
-3. Click "Run workflow" and select the branch (default: main)
+3. Click "Run workflow" and select the main branch
 
-#### 2. Crossplane Bootstrap
+Each workflow will trigger the next one upon successful completion.
 
-This workflow installs Crossplane on the base GKE cluster:
-- Sets up Crossplane via Helm
-- Configures GCP provider
-- Creates necessary RBAC permissions
+## Required Placeholder Replacements
 
-To run (will run automatically after successful Terraform workflow):
-1. Go to the Actions tab in your GitHub repository
-2. Select "Crossplane Bootstrap"
-3. Click "Run workflow"
+Before deploying, these placeholder values need replacement:
 
-#### 3. ArgoCD Bootstrap
+| File | Placeholder | Replace With | Description |
+|------|-------------|-------------|-------------|
+| **Terraform Infrastructure** |
+| `infra/environments/dev/variables.tf` | `your-gcp-project-id` | Your GCP project ID | The GCP project for all resources |
+| `infra/environments/dev/backend.tf` | `your-terraform-state-bucket` | Your GCS bucket name | From setup.sh output |
+| **Crossplane Configuration** |
+| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `your-gcp-project-id` | Your GCP project ID | Used by Crossplane to provision GKE |
+| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `dev-gke-node-sa@your-gcp-project-id.iam.gserviceaccount.com` | Your service account | Will be automatically replaced by GitHub workflow |
+| **Application Deployment** |
+| `workloads/hello-world/values.yaml` | `gcr.io/your-gcp-project-id/hello-world` | Your GCR image path | For container images |
 
-This workflow installs ArgoCD on the base GKE cluster:
-- Sets up ArgoCD via Helm
-- Configures Git repository access
-- Sets up initial applications
+## Cluster Design
 
-To run (will run automatically after successful Crossplane bootstrap):
-1. Go to the Actions tab in your GitHub repository
-2. Select "ArgoCD Bootstrap"
-3. Click "Run workflow"
+### Infracluster (GKE)
 
-#### 4. Register Application Clusters
+The infracluster is a small, efficient GKE cluster designed to host Crossplane:
 
-This workflow registers the Crossplane-created GKE clusters with ArgoCD:
-- Creates cluster secrets in ArgoCD
-- Sets up ApplicationSet for multi-cluster deployment
+- **Size:** Zonal cluster with 1 node (autoscales to 3)
+- **Machine Type:** e2-standard-2
+- **Disk:** 50GB standard persistent disk
+- **Cost Optimization:** Uses preemptible VMs
+- **Networking:** Private nodes with public control plane access
+- **Security:** Workload Identity enabled for GCP access
 
-To run (will run automatically after a new cluster is provisioned):
-1. Go to the Actions tab in your GitHub repository
-2. Select "Register Application Clusters" 
-3. Click "Run workflow" and specify:
-   - Environment (dev, staging, prod)
-   - Cluster name
+### Dev Cluster (via Crossplane)
 
-#### 5. Build Application
+The dev cluster is provisioned by Crossplane running on the infracluster:
 
-This workflow builds and pushes the container image:
-- Builds the container image
-- Pushes to Google Container Registry
-- Updates the image tag in ArgoCD application definitions
+- **Size:** Regional cluster with 1 node (autoscales to 3)
+- **Machine Type:** e2-standard-2
+- **Disk:** 50GB standard persistent disk
+- **Networking:** Uses the same VPC as the infracluster
+- **Security:** Workload Identity, Shielded nodes, and secure boot enabled
 
-To run (will run automatically when application code changes):
-1. Go to the Actions tab in your GitHub repository
-2. Select "Build Application"
-3. Click "Run workflow"
+## Modular Design
 
-## How GitOps Works in This Project
+The project follows a modular design philosophy:
 
-This project implements a true GitOps workflow:
+1. **Terraform Modules**
+   - VPC: Network infrastructure with public/private subnets
+   - GKE: GKE cluster with security and scalability options
+   - IAM: Service accounts with appropriate permissions
+   - APIs: Required GCP API enablement
 
-1. **Infrastructure as Code**:
-   - All infrastructure is defined as code in the repository
-   - Terraform defines the base infrastructure
-   - Crossplane defines the application clusters
-   - ArgoCD applications define the workloads
+2. **Crossplane Resources**
+   - Custom XRDs for GKE clusters
+   - Compositions that translate high-level specs to detailed GCP resources
+   - Provider configurations for GCP integration
 
-2. **Declarative Configuration**:
-   - All desired states are declared in YAML files
-   - No imperative commands are used for deployments
-   - Resources are synchronized from Git to the clusters
+## Future Enhancements
 
-3. **Pull-Based Deployments**:
-   - ArgoCD pulls changes from Git
-   - Changes are automatically applied to clusters
-   - Deployments happen when Git state changes
+### ArgoCD Integration (GitOps)
 
-4. **Continuous Reconciliation**:
-   - ArgoCD continuously compares Git state to cluster state
-   - Drift is automatically corrected
-   - Self-healing infrastructure and applications
+While not implemented in the current version, ArgoCD could be added to enhance GitOps capabilities:
 
-## Accessing and Using ArgoCD
+1. **Infrastructure as Code**
+   - ArgoCD would monitor Git repositories for Crossplane resources
+   - Changes to Crossplane resources would be automatically applied
 
-After the ArgoCD bootstrap workflow completes:
+2. **Application Deployment**
+   - ArgoCD Applications would define application deployments
+   - Multi-cluster deployments using ApplicationSets
+   - Progressive delivery patterns
 
-1. Get the initial admin password:
-   ```bash
-   kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
-   ```
+Implementation Path:
+1. Install ArgoCD on the infracluster alongside Crossplane
+2. Configure Git repositories for infrastructure and applications
+3. Set up ApplicationSets for deploying to multiple clusters
 
-2. Access the ArgoCD UI:
-   ```bash
-   # Using port forwarding
-   kubectl port-forward svc/argocd-server -n argocd 8080:80
-   # Then open http://localhost:8080 in your browser
-   ```
+### Multi-Environment Support
 
-3. View applications and their sync status in the UI
+The current design can be extended to support multiple environments:
 
-4. Trigger a sync manually if needed:
-   ```bash
-   # Using argocd CLI
-   argocd app sync crossplane-resources
-   ```
+1. **Additional Cluster Claims**
+   - Create staging and production cluster claims
+   - Apply different configurations based on environment
 
-## Manual Deployment (Alternative to GitHub Actions)
+2. **Environment-Specific Parameters**
+   - Resource limits
+   - Scaling parameters
+   - Security configurations
 
-### 1. Terraform Infrastructure
+## Troubleshooting
 
-```bash
-# Initialize Terraform
-cd infra/environments/dev
-terraform init
+### Common Issues
 
-# Apply Terraform configuration
-terraform plan
-terraform apply
-```
+#### Workflow Failures
+- Check GitHub Actions logs for detailed error messages
+- Verify GitHub secrets are configured correctly
 
-### 2. Crossplane and ArgoCD Bootstrap
+#### Crossplane Issues
+- Check Crossplane logs: `kubectl logs -l app=crossplane -n crossplane-system`
+- Verify provider configurations: `kubectl get providers -n crossplane-system`
+
+#### Dev Cluster Provisioning
+- Check Crossplane claim status: `kubectl get gkecluster.platform.commercelab.io`
+- View detailed status: `kubectl describe gkecluster.platform.commercelab.io/dev-gke-cluster`
+
+## Cleanup
+
+To remove all resources created by this project:
 
 ```bash
-# Get credentials for the management cluster
-gcloud container clusters get-credentials dev-crossplane-mgmt --region us-central1
-
-# Apply Crossplane bootstrap manifests
-kubectl apply -f crossplane/bootstrap/namespace.yaml
-kubectl apply -f crossplane/bootstrap/helm-repository.yaml
-kubectl apply -f crossplane/bootstrap/crossplane-helm-release.yaml
-kubectl apply -f crossplane/bootstrap/providers.yaml
-
-# Wait for Crossplane to be ready
-kubectl wait --for=condition=ready helmrelease/crossplane -n crossplane-system --timeout=300s
-
-# Apply ArgoCD bootstrap manifests
-kubectl apply -f crossplane/bootstrap/argocd/namespace.yaml
-kubectl apply -f crossplane/bootstrap/argocd/helm-repository.yaml
-kubectl apply -f crossplane/bootstrap/argocd/argocd-install.yaml
-
-# Wait for ArgoCD to be ready
-kubectl wait --for=condition=ready helmrelease/argocd -n argocd --timeout=300s
-
-# Configure Git repository access
-kubectl apply -f crossplane/bootstrap/argocd/git-repo.yaml
-
-# Apply ArgoCD applications
-kubectl apply -f argo-apps/crossplane/crossplane-app.yaml
+./scripts/cleanup.sh
 ```
 
-### 3. Application Development and Deployment
+This script will:
+1. Delete the dev GKE cluster
+2. Delete the infracluster
+3. Delete IAM service accounts
+4. Clean up networking resources
+5. Optionally delete the Terraform state bucket
 
-```bash
-# Build and push the container image
-cd workloads/hello-world/app
-docker build -t gcr.io/your-gcp-project-id/hello-world:latest .
-docker push gcr.io/your-gcp-project-id/hello-world:latest
+## Contributing
 
-# Update the image tag in ArgoCD application definitions
-# Then commit and push the changes
-git commit -am "Update image tag" && git push
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-# ArgoCD will automatically detect the changes and deploy the application
-```
+## License
 
-## Adding a New Environment
-
-To create a new environment (e.g., staging, production):
-
-1. Create environment directory:
-   ```bash
-   cp -r infra/environments/dev infra/environments/staging
-   ```
-
-2. Update variables in `infra/environments/staging/variables.tf`:
-   - Change `environment` default to `staging`
-   - Update network and subnet names
-
-3. Create a new GKE cluster claim:
-   ```bash
-   cp crossplane/xresources/dev-gke-cluster-claim.yaml crossplane/xresources/staging-gke-cluster-claim.yaml
-   ```
-
-4. Update the claim with staging-specific values:
-   - Change labels.environment to `staging`
-   - Update the network and subnet references
-   - Update serviceAccount if needed
-
-5. Commit and push the changes to trigger the GitOps pipeline
-
-## Clean Up
-
-To clean up resources:
-
-1. Delete ArgoCD applications:
-   ```bash
-   kubectl delete -n argocd app/hello-world applicationset/hello-world-multi-cluster
-   ```
-
-2. Delete application GKE clusters:
-   ```bash
-   kubectl delete -f crossplane/xresources/dev-gke-cluster-claim.yaml
-   ```
-
-3. Delete ArgoCD and Crossplane:
-   ```bash
-   kubectl delete -f crossplane/bootstrap/argocd/argocd-install.yaml
-   kubectl delete -f crossplane/bootstrap/crossplane-helm-release.yaml
-   ```
-
-4. Destroy Terraform infrastructure:
-   ```bash
-   cd infra/environments/dev
-   terraform destroy
-   ```
-
-## Security Considerations
-
-- All GKE clusters use private nodes with public control plane
-- Workload Identity is enabled on all clusters for secure GCP access
-- Service accounts follow the principle of least privilege
-- Network policies and binary authorization are enabled
-- ArgoCD uses repository credentials stored as Kubernetes secrets
-- Container images are scanned during CI/CD
+This project is licensed under the MIT License - see the LICENSE file for details.

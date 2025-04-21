@@ -28,7 +28,7 @@ module "gke" {
   depends_on  = [module.vpc, module.iam, module.apis]
   project_id  = var.project_id
   region      = var.region
-  cluster_name = "${var.environment}-crossplane-mgmt"
+  cluster_name = "infracluster"
   
   # Networking
   network_name = module.vpc.network_name
@@ -36,28 +36,28 @@ module "gke" {
   cluster_secondary_range_name  = module.vpc.subnet_secondary_ranges["${var.environment}-private-subnet"].pods
   services_secondary_range_name = module.vpc.subnet_secondary_ranges["${var.environment}-private-subnet"].services
   
-  # GKE configuration
-  regional            = true
+  # GKE configuration - Smaller zonal cluster for infrastructure management
+  regional            = false  # Use zonal cluster to save costs
   release_channel     = "REGULAR"
   master_ipv4_cidr_block = var.master_ipv4_cidr_block
   
-  # Node pool configuration
+  # Node pool configuration - Smaller, more efficient nodes
   service_account     = module.iam.gke_node_sa_email
   machine_type        = "e2-standard-2"
-  disk_size_gb        = 100
+  disk_size_gb        = 50     # Reduced disk size
   disk_type           = "pd-standard"
-  node_count          = 3
+  node_count          = 1      # Single node pool to start
   enable_autoscaling  = true
   min_nodes           = 1
-  max_nodes           = 5
-  preemptible         = false
+  max_nodes           = 3      # Reduced max nodes
+  preemptible         = true   # Use preemptible VMs to reduce cost
   
   # Node labels and tags
   node_labels = {
     environment = var.environment
-    role        = "crossplane-management"
+    role        = "infrastructure"
   }
-  node_tags = ["${var.environment}-gke", "crossplane-mgmt"]
+  node_tags = ["${var.environment}-gke", "infracluster"]
 }
 
 # Store kubeconfig as a local file for GitHub Actions to use
