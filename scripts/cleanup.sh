@@ -70,6 +70,26 @@ else
   INFRA_CLUSTER_EXISTS=false
 fi
 
+# Delete ingress controller and cert-manager from dev cluster if it exists
+echo
+echo -e "${YELLOW}Checking for dev-gke-cluster to clean up add-ons...${NC}"
+if gcloud container clusters describe dev-gke-cluster --region=us-central1 >/dev/null 2>&1; then
+  echo -e "${GREEN}Dev GKE cluster found, getting credentials...${NC}"
+  gcloud container clusters get-credentials dev-gke-cluster --region=us-central1 --project "$PROJECT_ID"
+  
+  echo -e "${YELLOW}Uninstalling NGINX Ingress Controller and cert-manager...${NC}"
+  # Delete cert-manager resources
+  kubectl delete clusterissuer letsencrypt-staging letsencrypt-prod 2>/dev/null || true
+  helm uninstall cert-manager -n cert-manager 2>/dev/null || true
+  kubectl delete namespace cert-manager 2>/dev/null || true
+  
+  # Delete NGINX Ingress Controller
+  helm uninstall ingress-nginx -n ingress-nginx 2>/dev/null || true
+  kubectl delete namespace ingress-nginx 2>/dev/null || true
+  
+  echo -e "${GREEN}Add-ons uninstalled from dev cluster.${NC}"
+fi
+
 # Delete dev GKE cluster if it exists via Crossplane
 if [ "$INFRA_CLUSTER_EXISTS" = true ]; then
   echo

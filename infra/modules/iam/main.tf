@@ -16,6 +16,9 @@ resource "google_project_iam_member" "crossplane_roles" {
     "roles/servicenetworking.networksAdmin",
     "roles/iam.serviceAccountAdmin",
     "roles/serviceusage.serviceUsageAdmin",
+    "roles/secretmanager.admin",        # Access Secret Manager
+    "roles/containerregistry.admin",    # Access Container Registry
+    "roles/dns.admin",                  # Manage DNS records
   ])
   project = var.project_id
   role    = each.value
@@ -42,7 +45,11 @@ resource "google_project_iam_member" "github_actions_roles" {
     "roles/container.admin",
     "roles/iam.serviceAccountUser",
     "roles/storage.admin",
-    "roles/iam.serviceAccountTokenCreator", # For workload identity federation
+    "roles/iam.serviceAccountTokenCreator",   # For workload identity federation
+    "roles/containerregistry.admin",          # Push container images
+    "roles/secretmanager.admin",              # Access Secret Manager
+    "roles/cloudbuild.builds.editor",         # Create/manage Cloud Build jobs
+    "roles/dns.admin",                        # Manage DNS records
   ])
   project = var.project_id
   role    = each.value
@@ -69,8 +76,37 @@ resource "google_project_iam_member" "gke_node_roles" {
     "roles/monitoring.metricWriter",
     "roles/monitoring.viewer",
     "roles/storage.objectViewer",
+    "roles/containerregistry.reader",       # Read access to container registry
   ])
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.gke_node_sa.email}"
+}
+
+# External Secrets service account for accessing Secret Manager
+resource "google_service_account" "external_secrets_sa" {
+  account_id   = "${var.environment}-external-secrets-sa"
+  display_name = "External Secrets Service Account for ${var.environment}"
+  project      = var.project_id
+  description  = "Service account for External Secrets to access Secret Manager"
+}
+
+# Grant Secret Manager access to External Secrets service account
+resource "google_project_iam_member" "external_secrets_roles" {
+  for_each = toset([
+    "roles/secretmanager.secretAccessor",
+    "roles/secretmanager.viewer",
+  ])
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.external_secrets_sa.email}"
+}
+
+# Workload Identity binding for External Secrets
+resource "google_service_account_iam_binding" "external_secrets_workload_identity" {
+  service_account_id = google_service_account.external_secrets_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  members = [
+    "serviceAccount:${var.project_id}.svc.id.goog[external-secrets/external-secrets]",
+  ]
 }

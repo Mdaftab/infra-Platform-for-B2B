@@ -23,6 +23,15 @@ module "apis" {
   project_id = var.project_id
 }
 
+module "gcr" {
+  source                = "../../modules/container-registry"
+  project_id            = var.project_id
+  location              = "us"  # Multi-regional registry for better performance
+  gke_node_sa_email     = module.iam.gke_node_sa_email
+  github_actions_sa_email = module.iam.github_actions_sa_email
+  depends_on            = [module.apis] # Ensure APIs are enabled first
+}
+
 module "gke" {
   source      = "../../modules/gke"
   depends_on  = [module.vpc, module.iam, module.apis]

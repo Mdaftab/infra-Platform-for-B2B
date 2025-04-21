@@ -2,6 +2,11 @@ name: Provision Dev GKE Cluster
 
 on:
   workflow_dispatch:
+    inputs:
+      email:
+        description: 'Email for Let''s Encrypt certificate'
+        required: false
+        default: 'admin@example.com'
   workflow_run:
     workflows: ["Crossplane Bootstrap"]
     types:
@@ -43,7 +48,7 @@ jobs:
       - name: Prepare and Apply Dev Cluster Claim
         run: |
           # Replace placeholders in dev cluster claim
-          sed -i 's/your-gcp-project-id/${{ secrets.GCP_PROJECT_ID }}/g' crossplane/xresources/dev-gke-cluster-claim.yaml
+          sed -i "s/\${GCP_PROJECT_ID}/${{ secrets.GCP_PROJECT_ID }}/g" crossplane/xresources/dev-gke-cluster-claim.yaml
           
           # Apply dev GKE cluster claim
           kubectl apply -f crossplane/xresources/dev-gke-cluster-claim.yaml
@@ -73,3 +78,30 @@ jobs:
           name: dev-cluster-kubeconfig
           path: dev-cluster-kubeconfig.yaml
           retention-days: 1
+          
+      - name: Install Add-ons on Dev Cluster
+        run: |
+          # Set up environment variables
+          DEV_CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/dev-gke-cluster -o jsonpath='{.status.clusterName}')
+          EMAIL="${{ github.event.inputs.email || 'admin@example.com' }}"
+          GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          GCP_EXTERNAL_SECRETS_SA="dev-external-secrets-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
+          
+          echo "Installing add-ons on cluster $DEV_CLUSTER_NAME..."
+          
+          # Set context to dev cluster
+          KUBECONFIG_DEV="$(pwd)/dev-cluster-kubeconfig.yaml"
+          export KUBECONFIG=$KUBECONFIG_DEV
+          
+          # Run the comprehensive add-ons installation script
+          ./kubernetes-addons/install.sh "$EMAIL" "$GCP_PROJECT_ID" "$GCP_EXTERNAL_SECRETS_SA"
+          
+          # Verify add-ons installation
+          echo "Verifying add-ons installation..."
+          kubectl get pods -n ingress-nginx
+          kubectl get pods -n cert-manager
+          kubectl get pods -n reloader
+          kubectl get pods -n external-secrets
+          kubectl get clusterissuer letsencrypt-staging
+          
+          echo "Add-ons installation complete!"

@@ -2,6 +2,15 @@ name: Deploy Application to Dev Cluster
 
 on:
   workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Domain name for the application'
+        required: false
+        default: 'hello-world.example.com'
+      email:
+        description: 'Email for Let''s Encrypt certificate'
+        required: false
+        default: 'admin@example.com'
   workflow_run:
     workflows: ["Provision Dev GKE Cluster"]
     types:
@@ -47,6 +56,65 @@ jobs:
         run: |
           echo "KUBECONFIG=$(pwd)/tmp/dev-cluster-kubeconfig.yaml" >> $GITHUB_ENV
           chmod 600 $(pwd)/tmp/dev-cluster-kubeconfig.yaml
+          
+      - name: Verify Add-ons Installation
+        run: |
+          echo "Verifying Kubernetes add-ons installation..."
+          
+          # Check NGINX Ingress Controller
+          if kubectl get service -n ingress-nginx ingress-nginx-controller >/dev/null 2>&1; then
+            echo "✅ NGINX Ingress Controller is installed"
+            INGRESS_IP=$(kubectl get service -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+            if [ -n "$INGRESS_IP" ]; then
+              echo "✅ NGINX Ingress Controller has external IP: $INGRESS_IP"
+            else
+              echo "⚠️ NGINX Ingress Controller is pending IP assignment"
+            fi
+          else
+            echo "❌ NGINX Ingress Controller is not installed properly"
+            echo "Please run kubernetes-addons/install.sh before deploying applications"
+            exit 1
+          fi
+          
+          # Check cert-manager
+          if kubectl get pods -n cert-manager | grep -q Running; then
+            echo "✅ cert-manager is installed"
+            
+            # Check ClusterIssuers
+            if kubectl get clusterissuer letsencrypt-staging >/dev/null 2>&1; then
+              echo "✅ Let's Encrypt Staging ClusterIssuer is configured"
+            else
+              echo "⚠️ Let's Encrypt Staging ClusterIssuer is not configured"
+            fi
+            
+            if kubectl get clusterissuer letsencrypt-prod >/dev/null 2>&1; then
+              echo "✅ Let's Encrypt Production ClusterIssuer is configured"
+            else
+              echo "⚠️ Let's Encrypt Production ClusterIssuer is not configured"
+            fi
+          else
+            echo "❌ cert-manager is not installed properly"
+            echo "Please run kubernetes-addons/install.sh before deploying applications"
+            exit 1
+          fi
+          
+          # Check Reloader
+          if kubectl get pods -n reloader | grep -q Running; then
+            echo "✅ Reloader is installed"
+          else
+            echo "⚠️ Reloader is not installed"
+            echo "Some features like automatic config reload may not work"
+          fi
+          
+          # Check External Secrets
+          if kubectl get pods -n external-secrets | grep -q Running; then
+            echo "✅ External Secrets Operator is installed"
+          else
+            echo "⚠️ External Secrets Operator is not installed"
+            echo "Secret management features may not work"
+          fi
+          
+          echo "Add-ons verification complete. Proceeding with application deployment."
 
       - name: Build and Push Container Image
         working-directory: workloads/hello-world/app
@@ -59,9 +127,47 @@ jobs:
       - name: Update Helm Values
         working-directory: workloads/hello-world
         run: |
+          # Configure domain and settings
+          DOMAIN="${{ github.event.inputs.domain || 'hello-world.example.com' }}"
+          GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
           # Update image repository and tag in values.yaml
-          sed -i "s|repository:.*|repository: gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world|" values.yaml
+          sed -i "s|repository:.*|repository: gcr.io/$GCP_PROJECT_ID/hello-world|" values.yaml
           sed -i "s|tag:.*|tag: ${{ github.sha }}|" values.yaml
+          
+          # Update ingress settings for NGINX and TLS
+          sed -i "s|className:.*|className: \"nginx\"|" values.yaml
+          
+          # Make sure we have the right annotations
+          grep -q "cert-manager.io/cluster-issuer" values.yaml || \
+            sed -i "/annotations:/a\\    cert-manager.io/cluster-issuer: \"letsencrypt-staging\"" values.yaml
+          
+          grep -q "nginx.ingress.kubernetes.io/ssl-redirect" values.yaml || \
+            sed -i "/annotations:/a\\    nginx.ingress.kubernetes.io/ssl-redirect: \"true\"" values.yaml
+          
+          # Update host name
+          sed -i "s|host:.*|host: $DOMAIN|" values.yaml
+          
+          # Make sure TLS is configured properly
+          if ! grep -q "tls:" values.yaml; then
+            cat << EOF >> values.yaml
+  tls:
+  - secretName: hello-world-tls
+    hosts:
+    - $DOMAIN
+EOF
+          else
+            sed -i "s|secretName:.*|secretName: hello-world-tls|" values.yaml
+            sed -i "/hosts:/d" values.yaml
+            sed -i "/secretName:/a\\    hosts:\\n    - $DOMAIN" values.yaml
+          fi
+            
+          # Enable External Secrets integration
+          sed -i 's/useExternalSecrets:.*/useExternalSecrets: true/' values.yaml
+          
+          # Show final configuration
+          echo "Final application configuration:"
+          cat values.yaml
 
       - name: Deploy Application using Helm
         working-directory: workloads/hello-world
@@ -74,18 +180,69 @@ jobs:
 
       - name: Wait for Deployment
         run: |
+          echo "Waiting for deployment to be available..."
           kubectl wait --for=condition=available deployment/hello-world --timeout=300s -n hello-world
           
-          # Get service details
-          echo "Application deployed successfully!"
-          kubectl get svc -n hello-world
+          # Get deployment details
+          echo "Deployment details:"
+          kubectl get deployment -n hello-world -o wide
           
-          # If LoadBalancer is used, get external IP
-          if kubectl get svc hello-world -n hello-world -o jsonpath='{.spec.type}' | grep -q 'LoadBalancer'; then
-            echo "Waiting for external IP..."
-            while [ -z $(kubectl get svc hello-world -n hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null) ]; do
-              sleep 10
-            done
-            EXTERNAL_IP=$(kubectl get svc hello-world -n hello-world -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            echo "Application is accessible at: http://$EXTERNAL_IP"
+          # Get pod details
+          echo "Pod details:"
+          kubectl get pods -n hello-world -o wide
+
+          # Get service details
+          echo "Service details:"
+          kubectl get service -n hello-world -o wide
+          
+          # Get ingress details
+          echo "Ingress details:"
+          kubectl get ingress -n hello-world -o wide
+          
+          # Check if TLS certificate is issued
+          echo "TLS certificate status:"
+          kubectl get certificate -n hello-world
+
+          # Get NGINX Ingress Controller external IP
+          echo "Retrieving NGINX Ingress Controller external IP..."
+          COUNTER=0
+          MAX_RETRIES=15
+          
+          while [ -z "$(kubectl get service -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)" ] && [ $COUNTER -lt $MAX_RETRIES ]; do
+            echo -n "."
+            sleep 10
+            COUNTER=$((COUNTER+1))
+          done
+          echo ""
+          
+          INGRESS_IP=$(kubectl get service -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          if [ -z "$INGRESS_IP" ]; then
+            echo "Failed to retrieve Ingress Controller IP. Please check manually."
+            INGRESS_IP="<pending>"
           fi
+          
+          DOMAIN="${{ github.event.inputs.domain || 'hello-world.example.com' }}"
+          
+          echo "============================================================="
+          echo "✅ Application '${{ github.repository }}' successfully deployed! ✅"
+          echo "============================================================="
+          echo "📊 Application information:"
+          echo "   - Namespace:      hello-world"
+          echo "   - Release name:   hello-world"
+          echo "   - Image:          gcr.io/${{ secrets.GCP_PROJECT_ID }}/hello-world:${{ github.sha }}"
+          echo ""
+          echo "🔗 Access URLs:"
+          echo "   - Using IP directly:   http://$INGRESS_IP"
+          echo "   - With proper DNS:     https://$DOMAIN"
+          echo ""
+          echo "🔐 TLS:"
+          echo "   - Certificate:         hello-world-tls"
+          echo "   - Issuer:              letsencrypt-staging"
+          echo ""
+          echo "📝 NOTE: To access the application using the domain name, you need to:"
+          echo "   1. Configure your DNS to point $DOMAIN to $INGRESS_IP"
+          echo "   2. Or add this entry to your local hosts file:"
+          echo "      $INGRESS_IP $DOMAIN"
+          echo ""
+          echo "🚀 The application is now fully deployed with ingress, TLS, and secrets support! 🚀"
+          echo "============================================================="

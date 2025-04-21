@@ -1,0 +1,42 @@
+reloader:
+  # Enable monitoring of all namespaces
+  watchGlobally: true
+
+  # Set compute resources
+  resources:
+    limits:
+      memory: 200Mi
+      cpu: 100m
+    requests:
+      memory: 50Mi
+      cpu: 10m
+      
+  # Security
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    capabilities:
+      drop: ["ALL"]
+  
+  # Set readiness and liveness probes
+  readinessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+  
+  livenessProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+  
+  # Auto-reload configuration
+  reloadStrategy: annotations
+  reloadOnCreate: false
+  reloadOnConfigMapChange: true
+  reloadOnSecretChange: true
+  
+  # RBAC configuration
+  rbac:
+    enabled: true
+    apiVersion: v1

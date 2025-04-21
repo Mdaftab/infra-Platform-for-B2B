@@ -1,0 +1,54 @@
+# Install cert-manager with all required CRDs
+installCRDs: true
+
+# Global configuration
+global:
+  leaderElection:
+    namespace: cert-manager
+
+# Main cert-manager controller
+cert-manager:
+  # Compute resources
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+      
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+
+# Webhook for validation
+webhook:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# CA Injector for automatically injecting
+# CA data into webhook configurations
+cainjector:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Pod security requirements
+securityContext:
+  enabled: true
+  fsGroup: 1001
+
+# Prometheus metrics
+prometheus:
+  enabled: true
+  servicemonitor:
+    enabled: false

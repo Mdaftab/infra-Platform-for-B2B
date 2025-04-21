@@ -1,0 +1,48 @@
+installCRDs: true
+
+# Controller configuration
+crds:
+  enabled: true
+
+# Controller settings
+controllerClass:
+  enabled: true
+  
+# Webhook settings
+webhook:
+  create: true
+  certManager:
+    enabled: true
+    
+# RBAC configuration  
+rbac:
+  create: true
+
+# Service account
+serviceAccount:
+  create: true
+  
+# Reasonable resource limits
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Security context
+securityContext:
+  enabled: true
+  runAsNonRoot: true
+  fsGroup: 1001
+  
+# Cert controller configuration  
+certController:
+  resources:
+    limits:
+      cpu: 50m
+      memory: 64Mi
+    requests:
+      cpu: 10m
+      memory: 32Mi

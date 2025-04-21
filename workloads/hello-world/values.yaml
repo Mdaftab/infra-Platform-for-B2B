@@ -21,14 +21,19 @@ service:
 
 ingress:
   enabled: true
-  className: "gce"
+  className: "nginx"
   annotations:
-    kubernetes.io/ingress.class: "gce"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
   hosts:
     - host: hello-world.example.com
       paths:
         - path: /
           pathType: Prefix
+  tls:
+  - secretName: hello-world-tls
+    hosts:
+    - hello-world.example.com
 
 nodeSelector: {}
 
@@ -37,3 +42,7 @@ tolerations: []
 affinity: {}
 
 environment: dev
+
+# Add-on specific configurations
+useExternalSecrets: true  # Set to true to use External Secrets Operator
+mountTLSCert: false       # Set to true to mount TLS certificates in the pod

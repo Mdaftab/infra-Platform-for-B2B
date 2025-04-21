@@ -4,7 +4,7 @@ A modern Kubernetes infrastructure management solution using Terraform, Crosspla
 
 ## Architecture Overview
 
-This platform implements a GitOps-driven infrastructure management approach with two clearly separated layers:
+This platform implements a modular infrastructure management approach with two clearly separated layers:
 
 1. **Infrastructure Layer (Terraform + Crossplane)**
    - Small, efficient "infracluster" GKE cluster provisioned with Terraform
@@ -14,8 +14,8 @@ This platform implements a GitOps-driven infrastructure management approach with
 
 2. **Application Layer**
    - Application GKE clusters ("devcluster") provisioned by Crossplane
-   - Standardized cluster configuration
-   - Sample application deployment
+   - Standardized cluster configuration with add-ons (NGINX Ingress, cert-manager, etc.)
+   - Secure application deployment with TLS and secret management
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -76,7 +76,19 @@ lab_commercelab/
 │   ├── terraform-infra.yaml          # Deploy Terraform infrastructure
 │   ├── crossplane-bootstrap.yaml     # Bootstrap Crossplane on infracluster
 │   ├── provision-dev-cluster.yaml    # Provision dev GKE cluster with Crossplane
-│   └── deploy-app.yaml               # Deploy application to dev cluster
+│   └── deploy-app.yaml               # Deploy application to dev cluster with TLS
+├── kubernetes-addons/                # Kubernetes add-ons
+│   ├── install.sh                    # Comprehensive installation script
+│   ├── ingress-nginx/                # NGINX Ingress Controller
+│   │   └── values.yaml               # Configuration values
+│   ├── cert-manager/                 # Certificate Manager
+│   │   ├── values.yaml               # Configuration values
+│   │   └── cluster-issuers.yaml      # Let's Encrypt issuers
+│   ├── reloader/                     # Reloader for auto-updates
+│   │   └── values.yaml               # Configuration values
+│   └── secret-manager/               # External Secrets Operator
+│       ├── values.yaml               # Configuration values
+│       └── secret-store.yaml         # SecretStore configurations
 ├── infra/                            # Terraform infrastructure code
 │   ├── modules/                      # Reusable Terraform modules
 │   │   ├── vpc/                      # VPC network module
@@ -94,6 +106,12 @@ lab_commercelab/
 │   │   └── provider-configs/         # Provider configurations
 │   ├── compositions/                 # XRM compositions
 │   │   └── gke-cluster.yaml          # GKE cluster composition
+│   ├── post-install/                 # Post-install add-ons
+│   │   ├── addons.yaml               # NGINX & cert-manager configs
+│   │   ├── apply-addons.sh           # Add-ons installation script
+│   │   └── flux/                     # GitOps controllers
+│   │       ├── controllers.yaml      # Flux controllers
+│   │       └── crds.yaml             # Flux CRDs
 │   └── xresources/                   # Custom resource definitions & claims
 │       ├── gke-cluster-definition.yaml # GKE cluster XRD
 │       └── dev-gke-cluster-claim.yaml # Dev GKE cluster claim
@@ -106,9 +124,13 @@ lab_commercelab/
 │       ├── Chart.yaml                # Helm chart metadata
 │       ├── values.yaml               # Helm chart values
 │       └── templates/                # Helm chart templates
+│           ├── deployment.yaml       # Kubernetes deployment
+│           ├── service.yaml          # Kubernetes service
+│           └── ingress.yaml          # Kubernetes ingress with TLS
 └── scripts/                          # Utility scripts
     ├── setup.sh                      # Setup script for GCP resources
-    └── cleanup.sh                    # Cleanup script for GCP resources
+    ├── cleanup.sh                    # Cleanup script for GCP resources
+    └── install-cluster-addons.sh     # Installs NGINX Ingress and cert-manager
 ```
 
 ## Prerequisites
@@ -157,9 +179,12 @@ The project uses GitHub Actions workflows for deployment. The workflows are trig
 
 3. **Provision Dev Cluster**
    - Uses Crossplane to provision the dev GKE cluster
+   - Automatically installs NGINX Ingress Controller and cert-manager as cluster add-ons
+   - Configures Let's Encrypt Cluster Issuers for automated TLS
 
 4. **Deploy Application**
-   - Builds and deploys the sample application to the dev cluster
+   - Uses the pre-installed NGINX Ingress Controller and cert-manager
+   - Builds and deploys the sample application with HTTPS support via Let's Encrypt
 
 To start the deployment:
 1. Go to the Actions tab in your GitHub repository
@@ -205,6 +230,10 @@ The dev cluster is provisioned by Crossplane running on the infracluster:
 - **Disk:** 50GB standard persistent disk
 - **Networking:** Uses the same VPC as the infracluster
 - **Security:** Workload Identity, Shielded nodes, and secure boot enabled
+- **Add-ons:**
+  - NGINX Ingress Controller for efficient ingress management
+  - cert-manager for automated TLS certificate management with Let's Encrypt
+  - Cluster Issuers configured for both staging and production certificates
 
 ## Modular Design
 
@@ -221,11 +250,50 @@ The project follows a modular design philosophy:
    - Compositions that translate high-level specs to detailed GCP resources
    - Provider configurations for GCP integration
 
+## Current Implementation
+
+The current implementation focuses on:
+
+1. **Terraform-based Infrastructure**
+   - Small, efficient infracluster deployment
+   - Modular Terraform code for GKE, IAM, networking, and Container Registry
+   - Clean separation of infrastructure components
+   - Proper integration between all infrastructure modules
+
+2. **Google Container Registry**
+   - Dedicated container registry for storing application images
+   - Properly connected to GKE clusters with appropriate IAM permissions
+   - Lifecycle policies for automatic cleanup of old images
+
+3. **Secret Management & IAM**
+   - Google Secret Manager integration
+   - External Secrets Operator for Kubernetes secrets
+   - Workload Identity configuration for secure credential management
+   - Properly scoped IAM roles and service accounts
+
+4. **Crossplane-based Cluster Management**
+   - Using Crossplane for managing additional GKE clusters
+   - Crossplane Custom Resource Definitions for standardized cluster deployment
+   - Automated dev cluster provisioning with proper resource configuration
+
+5. **Kubernetes Add-ons Management**
+   - Comprehensive add-on installation system
+   - NGINX Ingress Controller for traffic management
+   - cert-manager with Let's Encrypt for automatic TLS certificates
+   - Reloader for automatic deployment updates on config changes
+   - External Secrets Operator for secure secret management
+
+6. **Application Deployment with GitHub Actions**
+   - Complete CI/CD pipelines for building and deploying applications
+   - Proper container image building and pushing
+   - TLS certificate support for secure application access
+   - Secret management via External Secrets Operator
+
 ## Future Enhancements
 
 ### ArgoCD Integration (GitOps)
 
-While not implemented in the current version, ArgoCD could be added to enhance GitOps capabilities:
+A planned future enhancement is to add ArgoCD for full GitOps capabilities:
 
 1. **Infrastructure as Code**
    - ArgoCD would monitor Git repositories for Crossplane resources
@@ -269,6 +337,39 @@ The current design can be extended to support multiple environments:
 #### Dev Cluster Provisioning
 - Check Crossplane claim status: `kubectl get gkecluster.platform.commercelab.io`
 - View detailed status: `kubectl describe gkecluster.platform.commercelab.io/dev-gke-cluster`
+
+## Kubernetes Add-ons Architecture
+
+The platform includes a comprehensive set of Kubernetes add-ons to enhance cluster functionality:
+
+1. **Add-ons Installation Process:**
+   - All add-ons installed via a modular installation script after cluster provisioning
+   - Clean, declarative Helm-based installation for consistency
+   - Pre-configured for immediate use with applications
+
+2. **Included Add-ons:**
+   - **NGINX Ingress Controller:** Manages incoming traffic and routing
+   - **cert-manager:** Automates TLS certificate management with Let's Encrypt
+   - **Reloader:** Automatically restarts deployments when ConfigMaps or Secrets change
+   - **External Secrets Operator:** Manages secrets from external sources (GCP Secret Manager)
+
+3. **Manual Installation:**
+   
+   To install or reinstall the add-ons manually:
+   
+   ```bash
+   # Set your kubeconfig to point to the target cluster
+   export KUBECONFIG=/path/to/your/kubeconfig.yaml
+   
+   # Run the comprehensive add-ons installation script
+   ./kubernetes-addons/install.sh [EMAIL] [GCP_PROJECT_ID] [GCP_SERVICE_ACCOUNT]
+   ```
+
+4. **Add-ons Usage in Applications:**
+   - Applications use annotations to leverage add-on functionality
+   - TLS certificates are automatically provisioned and renewed
+   - Secrets are managed securely through External Secrets
+   - Configuration changes are automatically applied via Reloader
 
 ## Cleanup
 

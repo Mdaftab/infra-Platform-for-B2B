@@ -8,14 +8,14 @@ output "subnet_ids" {
   value       = module.vpc.subnet_ids
 }
 
-output "crossplane_sa_email" {
-  description = "Email of the Crossplane service account"
-  value       = module.iam.crossplane_sa_email
-}
-
-output "github_actions_sa_email" {
-  description = "Email of the GitHub Actions service account"
-  value       = module.iam.github_actions_sa_email
+output "service_accounts" {
+  description = "Service account emails"
+  value = {
+    crossplane_sa      = module.iam.crossplane_sa_email
+    github_actions_sa  = module.iam.github_actions_sa_email
+    gke_node_sa        = module.iam.gke_node_sa_email
+    external_secrets_sa = module.iam.external_secrets_sa_email
+  }
 }
 
 output "management_cluster_name" {
@@ -36,4 +36,9 @@ output "kubeconfig_path" {
 output "crossplane_sa_key_path" {
   description = "Path to the Crossplane service account key"
   value       = local_file.crossplane_sa_key.filename
+}
+
+output "container_registry_url" {
+  description = "URL of the Google Container Registry"
+  value       = module.gcr.registry_url
 }

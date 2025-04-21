@@ -24,3 +24,8 @@ output "gke_node_sa_email" {
   description = "Email of the GKE node service account"
   value       = google_service_account.gke_node_sa.email
 }
+
+output "external_secrets_sa_email" {
+  description = "Email of the External Secrets service account"
+  value       = google_service_account.external_secrets_sa.email
+}

@@ -10,7 +10,7 @@ metadata:
 spec:
   providerConfigRef:
     name: default
-  projectID: your-gcp-project-id
+  projectID: ${GCP_PROJECT_ID}
   location: us-central1
   clusterVersion: 1.28
   releaseChannel: REGULAR
@@ -26,7 +26,7 @@ spec:
     machineType: e2-standard-2
     diskSizeGb: 50
     diskType: pd-standard
-    serviceAccount: dev-gke-node-sa@your-gcp-project-id.iam.gserviceaccount.com
+    serviceAccount: dev-gke-node-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
     autoscaling:
       minNodeCount: 1
       maxNodeCount: 3
