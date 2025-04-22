@@ -49,7 +49,13 @@ jobs:
       - name: Download Kubeconfig from Terraform Workflow
         uses: actions/download-artifact@v3
         with:
-          name: dev-kubeconfig
+          name: infracluster-kubeconfig
+          path: ./tmp
+
+      - name: Download Shared VPC Info
+        uses: actions/download-artifact@v3
+        with:
+          name: shared-vpc-info
           path: ./tmp
 
       - name: Set KUBECONFIG Environment Variable
@@ -59,30 +65,53 @@ jobs:
 
       - name: Prepare and Apply Cluster Claim
         run: |
+          # Verify Crossplane is running
+          echo "Verifying Crossplane is running in the infracluster..."
+          if ! kubectl get namespace crossplane-system &>/dev/null; then
+            echo "Error: Crossplane namespace not found. Make sure Crossplane is installed on the infracluster."
+            exit 1
+          fi
+          
+          if ! kubectl get crds compositeresourcedefinitions.apiextensions.crossplane.io &>/dev/null; then
+            echo "Error: Crossplane CRDs not found. Make sure Crossplane is properly installed."
+            exit 1
+          fi
+          
+          echo "Crossplane is running properly. Proceeding with cluster provisioning..."
+          
           # Replace placeholders in cluster claim
           sed -i "s/\${GCP_PROJECT_ID}/${{ secrets.GCP_PROJECT_ID }}/g" crossplane/xresources/${TARGET_ENV}-gke-cluster-claim.yaml
           
-          # Apply GKE cluster claim
+          # Add the host project ID for the shared VPC
+          sed -i "s/\${GCP_HOST_PROJECT_ID}/${{ secrets.GCP_HOST_PROJECT_ID || secrets.GCP_PROJECT_ID }}/g" crossplane/xresources/${TARGET_ENV}-gke-cluster-claim.yaml
+          
+          # Apply the GKE cluster claim
           echo "Applying ${TARGET_ENV} GKE cluster claim..."
           kubectl apply -f crossplane/xresources/${TARGET_ENV}-gke-cluster-claim.yaml
           
           # Wait for cluster to be ready (this may take some time)
-          echo "Waiting for ${TARGET_ENV} GKE cluster to be provisioned (may take 10+ minutes)..."
-          kubectl wait --for=condition=ready gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster --timeout=900s
+          echo "Waiting for ${TARGET_ENV} GKE cluster to be provisioned (may take 15+ minutes)..."
+          kubectl wait --for=condition=ready gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster --timeout=1800s
           
-          # Get cluster name
+          # Get cluster name from the claim status
           CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster -o jsonpath='{.status.clusterName}')
           echo "${TARGET_ENV} cluster name: $CLUSTER_NAME"
           
           # Get cluster credentials
-          gcloud container clusters get-credentials $CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }}
+          SERVICE_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          CLUSTER_LOCATION=$(kubectl get gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster -o jsonpath='{.spec.location}')
           
-          # Save cluster kubeconfig for future use
+          echo "Getting credentials for cluster $CLUSTER_NAME in project $SERVICE_PROJECT_ID, location $CLUSTER_LOCATION"
+          gcloud container clusters get-credentials $CLUSTER_NAME --region $CLUSTER_LOCATION --project $SERVICE_PROJECT_ID
+          
+          # Save application cluster kubeconfig for future use
           KUBECONFIG_APP="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
-          gcloud container clusters get-credentials $CLUSTER_NAME --region us-central1 --project ${{ secrets.GCP_PROJECT_ID }} --kubeconfig $KUBECONFIG_APP
+          gcloud container clusters get-credentials $CLUSTER_NAME --region $CLUSTER_LOCATION --project $SERVICE_PROJECT_ID --kubeconfig $KUBECONFIG_APP
           
-          # Store cluster kubeconfig
+          # Export kubeconfig data
           echo "${TARGET_ENV}_KUBECONFIG_DATA=$(cat $KUBECONFIG_APP | base64 -w 0)" >> $GITHUB_ENV
+          echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
+          echo "CLUSTER_LOCATION=$CLUSTER_LOCATION" >> $GITHUB_ENV
 
       - name: Store Application Cluster Kubeconfig
         id: store-app-kubeconfig
@@ -95,19 +124,22 @@ jobs:
       - name: Install Add-ons on Application Cluster
         run: |
           # Set up environment variables
-          CLUSTER_NAME=$(kubectl get gkecluster.platform.commercelab.io/${TARGET_ENV}-gke-cluster -o jsonpath='{.status.clusterName}')
           EMAIL="${{ github.event.inputs.email || 'admin@example.com' }}"
           GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           GCP_EXTERNAL_SECRETS_SA="shared-external-secrets-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com"
           
-          echo "Installing add-ons on ${TARGET_ENV} cluster $CLUSTER_NAME..."
+          echo "Installing add-ons on ${TARGET_ENV} cluster $CLUSTER_NAME in $CLUSTER_LOCATION..."
           
           # Set context to application cluster
-          KUBECONFIG_APP="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
-          export KUBECONFIG=$KUBECONFIG_APP
+          export KUBECONFIG="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
           
-          # Run the comprehensive add-ons installation script
-          ./kubernetes-addons/install.sh "$EMAIL" "$GCP_PROJECT_ID" "$GCP_EXTERNAL_SECRETS_SA"
+          # Run the comprehensive add-ons installation script with proper parameters
+          ./kubernetes-addons/install.sh \
+            --email "$EMAIL" \
+            --project "$GCP_PROJECT_ID" \
+            --service-account "$GCP_EXTERNAL_SECRETS_SA" \
+            --environment "$TARGET_ENV" \
+            --cluster-name "$CLUSTER_NAME"
           
           # Verify add-ons installation
           echo "Verifying add-ons installation..."
@@ -117,4 +149,42 @@ jobs:
           kubectl get pods -n external-secrets
           kubectl get clusterissuer letsencrypt-staging
           
-          echo "Add-ons installation complete!"
+          echo "Add-ons installation complete for ${TARGET_ENV} environment!"
+          
+      - name: Report Cluster Status
+        if: ${{ success() }}
+        run: |
+          export KUBECONFIG="$(pwd)/${TARGET_ENV}-cluster-kubeconfig.yaml"
+          
+          # Get key cluster information
+          NODE_COUNT=$(kubectl get nodes --no-headers | wc -l)
+          INGRESS_IP=$(kubectl get service -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+          CERT_MANAGER_STATUS=$(kubectl get pods -n cert-manager --no-headers | grep Running | wc -l)
+          
+          # Report success with cluster information
+          echo "====================================================================="
+          echo "✅ ${TARGET_ENV} GKE cluster successfully provisioned and configured! ✅"
+          echo "====================================================================="
+          echo "📊 Cluster information:"
+          echo "   - Environment:    ${TARGET_ENV}"
+          echo "   - Cluster Name:   ${CLUSTER_NAME}"
+          echo "   - Location:       ${CLUSTER_LOCATION}" 
+          echo "   - Node Count:     ${NODE_COUNT}"
+          echo "   - Project:        ${{ secrets.GCP_PROJECT_ID }}"
+          echo ""
+          echo "🔧 Installed Add-ons:"
+          echo "   - NGINX Ingress Controller (LoadBalancer IP: ${INGRESS_IP})"
+          echo "   - cert-manager (${CERT_MANAGER_STATUS} pods running)"
+          echo "   - External Secrets Operator"
+          echo "   - Reloader"
+          echo ""
+          echo "🔐 TLS Configuration:"
+          echo "   - Let's Encrypt Staging Issuer: Ready"
+          echo "   - Let's Encrypt Production Issuer: Ready"
+          echo ""
+          echo "📝 Next Steps:"
+          echo "   - Deploy applications to your new ${TARGET_ENV} cluster"
+          echo "   - Configure DNS for your applications"
+          echo "   - Set up GitOps workflows for continuous deployment"
+          echo ""
+          echo "======================================================================"

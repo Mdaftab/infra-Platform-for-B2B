@@ -9,17 +9,24 @@ metadata:
 spec:
   providerConfigRef:
     name: default
+  clusterName: staging-gke-cluster
   projectID: ${GCP_PROJECT_ID}
   location: us-central1
   clusterVersion: 1.28
   releaseChannel: REGULAR
   maintenanceWindow:
     startTime: "02:00"
-  network:
-    name: infracluster-vpc  # Using the same VPC as infracluster
-    subnetName: infracluster-private-subnet
-    clusterPodRangeName: infracluster-private-subnet-pods
-    clusterSvcRangeName: infracluster-private-subnet-services
+    recurrence: "FREQ=WEEKLY;BYDAY=SA,SU"
+  
+  # Network configuration - Use environment-specific VPC (connected to shared VPC via peering)
+  networkConfig:
+    networkName: staging-vpc
+    subnetName: staging-subnet
+    podCidrBlock: "10.48.0.0/16"  # Environment-specific pod CIDR
+    serviceCidrBlock: "10.49.0.0/20"  # Environment-specific service CIDR
+    # VPC peering to the shared VPC is already configured via Terraform
+  
+  # Node configuration
   nodeConfig:
     nodeCount: 2
     machineType: e2-standard-2
@@ -32,3 +39,16 @@ spec:
     labels:
       environment: staging
       role: application
+    
+  # Security configuration  
+  securityConfig:
+    enableShieldedNodes: true
+    enableIntegrityMonitoring: true
+    enableSecureBoot: true
+    enableNetworkPolicy: true
+    privateClusterConfig:
+      enablePrivateNodes: true
+      enablePrivateEndpoint: false
+      masterIpv4CidrBlock: "172.16.2.16/28" # Specific to staging environment
+      masterAuthorizedNetworks:
+        - cidrBlock: "10.0.0.0/20" # Shared VPC subnet CIDR to allow communication from infracluster

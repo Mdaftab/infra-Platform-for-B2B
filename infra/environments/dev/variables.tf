@@ -3,7 +3,7 @@
 ## ==========================================================================
 
 variable "project_id" {
-  description = "The GCP project ID"
+  description = "The GCP project ID for the host project (shared VPC)"
   type        = string
 
   validation {
@@ -24,53 +24,32 @@ variable "region" {
 }
 
 ## ==========================================================================
-## Network Configuration
+## Shared VPC Network Configuration
 ## ==========================================================================
 
-variable "network_name" {
-  description = "The name of the VPC network"
-  type        = string
-  default     = "infracluster-vpc"
-}
-
-variable "subnets" {
-  description = "Subnet configurations for the VPC"
-  type = list(object({
-    name          = string
-    ip_cidr_range = string
-    region        = string
-    private       = bool
-    secondary_ranges = object({
-      pods     = string
-      services = string
-    })
-  }))
-  default = [
-    {
-      name          = "infracluster-private-subnet"
-      ip_cidr_range = "10.0.0.0/20"
-      region        = "us-central1"
-      private       = true
-      secondary_ranges = {
-        pods     = "10.16.0.0/16"
-        services = "10.17.0.0/20"
-      }
-    },
-    {
-      name          = "infracluster-public-subnet"
-      ip_cidr_range = "10.0.16.0/20"
-      region        = "us-central1"
-      private       = false
-      secondary_ranges = {
-        pods     = "10.18.0.0/16" 
-        services = "10.19.0.0/20"
-      }
-    }
-  ]
+variable "shared_vpc_config" {
+  description = "Configuration for the shared VPC network"
+  type = object({
+    network_name        = string
+    enable_flow_logs    = optional(bool, true)
+    create_nat_gateway  = optional(bool, true)
+    is_shared_vpc_host  = optional(bool, true)
+    service_project_ids = optional(list(string), [])
+    subnets = list(object({
+      name           = string
+      ip_cidr_range  = string
+      region         = string
+      private        = bool
+      secondary_ranges = object({
+        pods     = string
+        services = string
+      })
+    }))
+  })
 
   validation {
-    condition     = length(var.subnets) > 0
-    error_message = "At least one subnet must be defined."
+    condition     = length(var.shared_vpc_config.subnets) > 0
+    error_message = "At least one subnet must be defined in the shared VPC."
   }
 }
 
@@ -78,40 +57,54 @@ variable "subnets" {
 ## Infracluster Configuration
 ## ==========================================================================
 
-variable "infracluster_name" {
-  description = "Name of the infrastructure GKE cluster"
-  type        = string
-  default     = "infracluster"
-}
-
 variable "infracluster_config" {
-  description = "Configuration for the infrastructure GKE cluster"
+  description = "Configuration for the infrastructure GKE cluster (infracluster)"
   type = object({
-    regional               = bool
-    release_channel        = string
-    master_ipv4_cidr_block = string
-    machine_type           = string
-    disk_size_gb           = number
-    disk_type              = string
-    node_count             = number
-    enable_autoscaling     = bool
-    min_nodes              = number
-    max_nodes              = number
-    preemptible            = bool
+    name                 = string
+    description          = optional(string, "Shared infrastructure GKE cluster for Crossplane")
+    regional             = optional(bool, true)
+    location             = string
+    release_channel      = string
+    network_config = object({
+      network_name            = string
+      subnet_name             = string
+      master_ipv4_cidr_block  = string
+      cluster_ipv4_cidr_block = optional(string)
+      services_ipv4_cidr_block = optional(string)
+    })
+    node_pools = list(object({
+      name          = string
+      machine_type  = string
+      disk_size_gb  = number
+      disk_type     = string
+      node_count    = number
+      autoscaling   = object({
+        min_node_count = number
+        max_node_count = number
+      })
+      management    = object({
+        auto_repair  = bool
+        auto_upgrade = bool
+      })
+      node_metadata = string
+      preemptible   = bool
+      labels        = map(string)
+      tags          = list(string)
+    }))
+    maintenance_window = optional(object({
+      start_time  = string
+      end_time    = optional(string)
+      recurrence  = optional(string)
+    }))
+    security_config = optional(object({
+      enable_shielded_nodes       = optional(bool, true)
+      enable_integrity_monitoring = optional(bool, true)
+      enable_secure_boot          = optional(bool, true)
+      enable_binary_authorization = optional(bool, false)
+      enable_network_policy       = optional(bool, true)
+      enable_intranode_visibility = optional(bool, false)
+    }))
   })
-  default = {
-    regional               = false
-    release_channel        = "REGULAR"
-    master_ipv4_cidr_block = "172.16.0.0/28"
-    machine_type           = "e2-standard-2"
-    disk_size_gb           = 50
-    disk_type              = "pd-standard"
-    node_count             = 1
-    enable_autoscaling     = true
-    min_nodes              = 1
-    max_nodes              = 3
-    preemptible            = true
-  }
 
   validation {
     condition     = contains(["RAPID", "REGULAR", "STABLE"], var.infracluster_config.release_channel)
@@ -119,7 +112,7 @@ variable "infracluster_config" {
   }
 
   validation {
-    condition     = var.infracluster_config.master_ipv4_cidr_block != null && can(cidrnetmask(var.infracluster_config.master_ipv4_cidr_block))
-    error_message = "Master CIDR block must be a valid CIDR notation."
+    condition     = length(var.infracluster_config.node_pools) > 0
+    error_message = "At least one node pool must be defined for the infracluster."
   }
 }

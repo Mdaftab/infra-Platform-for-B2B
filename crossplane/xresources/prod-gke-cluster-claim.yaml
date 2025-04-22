@@ -9,22 +9,29 @@ metadata:
 spec:
   providerConfigRef:
     name: default
+  clusterName: prod-gke-cluster
   projectID: ${GCP_PROJECT_ID}
   location: us-central1
   clusterVersion: 1.28
-  releaseChannel: STABLE  # More stable release channel for production
+  releaseChannel: STABLE
   maintenanceWindow:
     startTime: "01:00"
-  network:
-    name: infracluster-vpc  # Using the same VPC as infracluster
-    subnetName: infracluster-private-subnet
-    clusterPodRangeName: infracluster-private-subnet-pods
-    clusterSvcRangeName: infracluster-private-subnet-services
+    recurrence: "FREQ=WEEKLY;BYDAY=SA"
+  
+  # Network configuration - Use environment-specific VPC (connected to shared VPC via peering)
+  networkConfig:
+    networkName: prod-vpc
+    subnetName: prod-subnet
+    podCidrBlock: "10.64.0.0/16"  # Environment-specific pod CIDR
+    serviceCidrBlock: "10.65.0.0/20"  # Environment-specific service CIDR
+    # VPC peering to the shared VPC is already configured via Terraform
+  
+  # Node configuration
   nodeConfig:
     nodeCount: 3
     machineType: e2-standard-4
     diskSizeGb: 100
-    diskType: pd-ssd  # Better performance for production
+    diskType: pd-ssd
     serviceAccount: shared-gke-node-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com
     autoscaling:
       minNodeCount: 3
@@ -32,3 +39,26 @@ spec:
     labels:
       environment: prod
       role: application
+    
+  # Security configuration  
+  securityConfig:
+    enableShieldedNodes: true
+    enableIntegrityMonitoring: true
+    enableSecureBoot: true
+    enableNetworkPolicy: true
+    enableBinaryAuthorization: true
+    privateClusterConfig:
+      enablePrivateNodes: true
+      enablePrivateEndpoint: false
+      masterIpv4CidrBlock: "172.16.3.16/28" # Specific to production environment
+      masterAuthorizedNetworks:
+        - cidrBlock: "10.0.0.0/20" # Shared VPC subnet CIDR to allow communication from infracluster
+        
+  # High availability configuration
+  highAvailabilityConfig:
+    regionalCluster: true
+    maintenanceExclusionWindows:
+      - name: "black-friday"
+        startTime: "2024-11-20T00:00:00Z"
+        endTime: "2024-12-01T00:00:00Z"
+        description: "Black Friday/Cyber Monday exclusion window"

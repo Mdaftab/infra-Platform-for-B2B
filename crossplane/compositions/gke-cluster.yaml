@@ -27,6 +27,25 @@ spec:
           toFieldPath: metadata.labels
         - fromFieldPath: metadata.annotations
           toFieldPath: metadata.annotations
+    - name: security-config
+      patches:
+        - fromFieldPath: spec.securityConfig.enableShieldedNodes
+          toFieldPath: spec.forProvider.enableShieldedNodes
+          policy:
+            fromFieldPath: Optional
+        - fromFieldPath: spec.securityConfig.enableNetworkPolicy
+          toFieldPath: spec.forProvider.networkPolicy[0].enabled
+          policy:
+            fromFieldPath: Optional
+        - fromFieldPath: spec.securityConfig.enableBinaryAuthorization
+          toFieldPath: spec.forProvider.binaryAuthorization[0].evaluationMode
+          transforms:
+            - type: map
+              map:
+                "true": "PROJECT_SINGLETON_POLICY_ENFORCE"
+                "false": "DISABLED"
+          policy:
+            fromFieldPath: Optional
 
   resources:
     - name: gke-cluster
@@ -35,7 +54,7 @@ spec:
         kind: Cluster
         metadata:
           annotations:
-            crossplane.io/external-name: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)"
+            crossplane.io/external-name: "$(spec.clusterName)"
           labels:
             crossplane.io/composition: gke-cluster
         spec:
@@ -46,19 +65,28 @@ spec:
             monitoringService: monitoring.googleapis.com/kubernetes
             networkingMode: VPC_NATIVE
             removeDefaultNodePool: true
+            # IP allocation policy for VPC-native mode
             ipAllocationPolicy:
-              - clusterSecondaryRangeName: $(spec.network.clusterPodRangeName)
-                servicesSecondaryRangeName: $(spec.network.clusterSvcRangeName)
-            network: projects/$(spec.projectID)/global/networks/$(spec.network.name)
-            subnetwork: projects/$(spec.projectID)/regions/$(spec.location)/subnetworks/$(spec.network.subnetName)
+              - clusterIpv4CidrBlock: $(spec.networkConfig.podCidrBlock)
+                servicesIpv4CidrBlock: $(spec.networkConfig.serviceCidrBlock)
+            # Private cluster config
+            privateClusterConfig:
+              - enablePrivateNodes: $(spec.securityConfig.privateClusterConfig.enablePrivateNodes)
+                enablePrivateEndpoint: $(spec.securityConfig.privateClusterConfig.enablePrivateEndpoint)
+                masterIpv4CidrBlock: $(spec.securityConfig.privateClusterConfig.masterIpv4CidrBlock)
+            # Master authorized networks - include shared VPC subnet for infracluster access
+            masterAuthorizedNetworksConfig:
+              - cidrBlocks:
+                  - cidrBlock: $(spec.securityConfig.privateClusterConfig.masterAuthorizedNetworks[0].cidrBlock)
+                    displayName: "Infracluster Subnet Access"
+            # Environment-specific VPC network references (same project)
+            network: projects/$(spec.projectID)/global/networks/$(spec.networkConfig.networkName)
+            subnetwork: projects/$(spec.projectID)/regions/$(spec.location)/subnetworks/$(spec.networkConfig.subnetName)
             releaseChannel:
               - channel: $(spec.releaseChannel)
             datapathProvider: ADVANCED_DATAPATH
             workloadIdentityConfig:
               - workloadPool: $(spec.projectID).svc.id.goog
-            maintenancePolicy:
-              - dailyMaintenanceWindow:
-                  - startTime: "03:00"
             addonsConfig:
               - httpLoadBalancing:
                   - disabled: false
@@ -66,11 +94,12 @@ spec:
                   - disabled: false
                 networkPolicyConfig:
                   - disabled: false
-            binaryAuthorization:
-              - evaluationMode: PROJECT_SINGLETON_POLICY_ENFORCE
+                gceFilestoreCsiDriverConfig:
+                  - enabled: true
+                gcePersistentDiskCsiDriverConfig:
+                  - enabled: true
             verticalPodAutoscaling:
               - enabled: true
-            enableShieldedNodes: true
           writeConnectionSecretToRef:
             namespace: crossplane-system
       patches:
@@ -82,6 +111,10 @@ spec:
         - fromFieldPath: spec.providerConfigRef.name
           toFieldPath: spec.providerConfigRef.name
 
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.projectID
+        
         # Patch location
         - fromFieldPath: spec.location
           toFieldPath: spec.forProvider.location
@@ -97,6 +130,10 @@ spec:
             - type: string
               string:
                 fmt: "gke-cluster-%s"
+                
+        # Apply security config patches
+        - type: PatchSet
+          patchSetName: security-config
 
         # Patch maintenance policy
         - fromFieldPath: spec.maintenanceWindow.startTime
@@ -105,6 +142,29 @@ spec:
             - type: string
               string:
                 fmt: "%s:00"
+                
+        # Patch maintenance recurrence if specified
+        - fromFieldPath: spec.maintenanceWindow.recurrence
+          toFieldPath: spec.forProvider.maintenancePolicy[0].recurringWindow[0].recurrence
+          policy:
+            fromFieldPath: Optional
+            
+        # Patch maintenance exclusion windows for production
+        - fromFieldPath: spec.highAvailabilityConfig.maintenanceExclusionWindows
+          toFieldPath: spec.forProvider.maintenancePolicy[0].maintenanceExclusion
+          policy:
+            fromFieldPath: Optional
+            
+        # Patch regional configuration
+        - fromFieldPath: spec.highAvailabilityConfig.regionalCluster
+          toFieldPath: spec.forProvider.location
+          transforms:
+            - type: map
+              map:
+                "true": "$(spec.location)"
+                "false": "$(spec.location)-a"
+          policy:
+            fromFieldPath: Optional
 
     - name: gke-node-pool
       base:
@@ -112,13 +172,18 @@ spec:
         kind: NodePool
         metadata:
           annotations:
-            crossplane.io/external-name: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)-nodes"
+            crossplane.io/external-name: "$(spec.clusterName)-nodes"
           labels:
             crossplane.io/composition: gke-node-pool
         spec:
           forProvider:
-            location: us-central1
+            location: $(spec.location)
+            cluster: $(spec.clusterName)
             nodeCount: 1
+            management:
+              - autoRepair: true
+                autoUpgrade: true
+            maxPodsPerNode: 110
             nodeConfig:
               - diskSizeGb: 100
                 diskType: pd-standard
@@ -132,19 +197,13 @@ spec:
                 metadata:
                   disable-legacy-endpoints: "true"
                 shieldedInstanceConfig:
-                  - enableIntegrityMonitoring: true
-                    enableSecureBoot: true
+                  - enableIntegrityMonitoring: $(spec.securityConfig.enableIntegrityMonitoring)
+                    enableSecureBoot: $(spec.securityConfig.enableSecureBoot)
                 workloadMetadataConfig:
                   - mode: GKE_METADATA
-                gvnic:
-                  - enabled: true
                 labels:
                   environment: $(common.metadata.labels.environment)
                   role: $(common.metadata.labels.role)
-            management:
-              - autoRepair: true
-                autoUpgrade: true
-            maxPodsPerNode: 110
       patches:
         # Patch standard metadata
         - type: PatchSet
@@ -153,18 +212,29 @@ spec:
         # Patch provider configuration
         - fromFieldPath: spec.providerConfigRef.name
           toFieldPath: spec.providerConfigRef.name
+          
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.projectID
 
         # Link to cluster
-        - fromFieldPath: metadata.name
+        - fromFieldPath: spec.clusterName
           toFieldPath: spec.forProvider.cluster
-          transforms:
-            - type: string
-              string:
-                fmt: "$(common.metadata.labels.environment)-$(common.metadata.labels.name)"
 
         # Patch location
         - fromFieldPath: spec.location
           toFieldPath: spec.forProvider.location
+
+        # Patch location based on high availability config
+        - fromFieldPath: spec.highAvailabilityConfig.regionalCluster
+          toFieldPath: spec.forProvider.location
+          transforms:
+            - type: map
+              map:
+                "true": "$(spec.location)"
+                "false": "$(spec.location)-a"
+          policy:
+            fromFieldPath: Optional
 
         # Patch common parameters
         - type: PatchSet

@@ -21,6 +21,7 @@ spec:
             spec:
               type: object
               properties:
+                # Basic Cluster Configuration
                 providerConfigRef:
                   description: Reference to the provider configuration
                   type: object
@@ -29,8 +30,11 @@ spec:
                       type: string
                   required:
                     - name
+                clusterName:
+                  description: Name for the GKE cluster
+                  type: string
                 projectID:
-                  description: GCP Project ID
+                  description: GCP Project ID where the cluster will be created
                   type: string
                 location:
                   description: GCP region for the cluster
@@ -48,6 +52,8 @@ spec:
                     - RAPID
                     - REGULAR
                     - STABLE
+                
+                # Maintenance Configuration
                 maintenanceWindow:
                   description: Maintenance window configuration
                   type: object
@@ -56,29 +62,39 @@ spec:
                       description: Start time for maintenance window in HH:MM format
                       type: string
                       default: "03:00"
+                    endTime:
+                      description: End time for maintenance window in HH:MM format (for recurring windows)
+                      type: string
+                    recurrence:
+                      description: RFC 5545 RRULE for when maintenance windows occur
+                      type: string
                   required:
                     - startTime
-                network:
-                  description: Network configuration
+                
+                # Network Configuration
+                networkConfig:
+                  description: Configuration for the cluster's network (environment-specific VPC)
                   type: object
                   properties:
-                    name:
-                      description: VPC network name
+                    networkName:
+                      description: Name of the VPC network in the environment project
                       type: string
                     subnetName:
-                      description: Subnet name
+                      description: Name of the subnet in the environment-specific VPC
                       type: string
-                    clusterPodRangeName:
-                      description: Name of the secondary IP range for pods
+                    podCidrBlock:
+                      description: CIDR block for pods in the cluster
                       type: string
-                    clusterSvcRangeName:
-                      description: Name of the secondary IP range for services
+                    serviceCidrBlock:
+                      description: CIDR block for services in the cluster
                       type: string
                   required:
-                    - name
+                    - networkName
                     - subnetName
-                    - clusterPodRangeName
-                    - clusterSvcRangeName
+                    - podCidrBlock
+                    - serviceCidrBlock
+                
+                # Node Configuration
                 nodeConfig:
                   description: Node pool configuration
                   type: object
@@ -124,8 +140,117 @@ spec:
                         type: string
                   required:
                     - serviceAccount
+                
+                # Security Configuration
+                securityConfig:
+                  description: Security configuration for the cluster
+                  type: object
+                  properties:
+                    enableShieldedNodes:
+                      description: Enable Shielded Nodes
+                      type: boolean
+                      default: true
+                    enableIntegrityMonitoring:
+                      description: Enable integrity monitoring for Shielded Nodes
+                      type: boolean
+                      default: true
+                    enableSecureBoot:
+                      description: Enable Secure Boot for Shielded Nodes
+                      type: boolean
+                      default: true
+                    enableNetworkPolicy:
+                      description: Enable Kubernetes Network Policy
+                      type: boolean
+                      default: true
+                    enableBinaryAuthorization:
+                      description: Enable Binary Authorization
+                      type: boolean
+                      default: false
+                    privateClusterConfig:
+                      description: Private cluster configuration
+                      type: object
+                      properties:
+                        enablePrivateNodes:
+                          description: Enable private nodes
+                          type: boolean
+                          default: true
+                        enablePrivateEndpoint:
+                          description: Enable private endpoint
+                          type: boolean
+                          default: false
+                        masterIpv4CidrBlock:
+                          description: CIDR block for the master's private endpoint
+                          type: string
+                        masterAuthorizedNetworks:
+                          description: CIDRs that can access the master endpoint
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              cidrBlock:
+                                description: CIDR block
+                                type: string
+                              displayName:
+                                description: Display name for the CIDR block
+                                type: string
+                                default: "Authorized Network"
+                          default:
+                            - cidrBlock: "10.0.0.0/8"
+                              displayName: "Private Network"
+                
+                # High Availability Configuration
+                highAvailabilityConfig:
+                  description: High availability configuration
+                  type: object
+                  properties:
+                    regionalCluster:
+                      description: Whether to create a regional cluster
+                      type: boolean
+                      default: true
+                    maintenanceExclusionWindows:
+                      description: Maintenance exclusion windows (e.g., for holiday blackout periods)
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name:
+                            description: Name of the exclusion window
+                            type: string
+                          startTime:
+                            description: Start time in RFC3339 format
+                            type: string
+                          endTime:
+                            description: End time in RFC3339 format
+                            type: string
+                          description:
+                            description: Description of why this exclusion window exists
+                            type: string
               required:
                 - providerConfigRef
                 - projectID
-                - network
+                - networkConfig
                 - nodeConfig
+            status:
+              type: object
+              properties:
+                clusterName:
+                  description: The name of the created cluster
+                  type: string
+                endpoint:
+                  description: The endpoint of the cluster
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string

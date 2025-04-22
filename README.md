@@ -1,98 +1,92 @@
-# Multi-Cluster Kubernetes Management Platform
+# Multi-Cluster Kubernetes Management Platform with VPC Peering
 
-A modern Kubernetes infrastructure management solution using Terraform, Crossplane, and GitHub Actions to implement a multi-cluster Kubernetes environment on Google Cloud Platform.
+A modern Kubernetes infrastructure management solution using Terraform, Crossplane, and GitHub Actions to implement a multi-cluster Kubernetes environment on Google Cloud Platform leveraging a multi-VPC architecture with VPC peering for enhanced isolation and controlled connectivity between infrastructure and application environments.
 
 ## Architecture Overview
 
-This platform implements a modular infrastructure management approach with two clearly separated layers:
+This platform implements an advanced infrastructure management approach with a multi-VPC architecture:
 
 1. **Infrastructure Layer (Terraform)**
+   - Host Project with shared VPC network
    - Small, efficient "infracluster" GKE cluster provisioned with Terraform
-   - Single shared VPC network for all clusters
-   - Standardized IAM service accounts with appropriate permissions
+   - Crossplane running on the infracluster to manage application clusters
+   - VPC peering connections to environment-specific VPCs
    - Infrastructure-as-Code principles throughout
 
-2. **Cluster Management Layer (Crossplane)**
-   - Crossplane running on the infracluster to manage additional GKE clusters
-   - Declarative custom resources for defining application clusters
+2. **Service Projects Layer**
+   - Separate GCP projects for different environments (dev, staging, prod)
+   - Each environment has its own dedicated VPC
+   - All environment VPCs connected to the shared VPC via peering
+   - Clear network isolation with controlled cross-environment communication
+
+3. **Cluster Management Layer (Crossplane)**
+   - Crossplane running on the infracluster to manage application clusters
+   - Declarative custom resources for defining GKE clusters in service projects
    - Standardized compositions for consistent cluster configuration
    - Multi-environment support (dev, staging, prod)
 
-3. **Application Layer**
-   - Application GKE clusters provisioned by Crossplane
-   - Standardized cluster configuration with add-ons (NGINX Ingress, cert-manager, etc.)
+4. **Application Layer**
+   - Application GKE clusters provisioned by Crossplane in environment-specific VPCs
+   - Standardized cluster configuration with add-ons
    - Secure application deployment with TLS and secret management
    - Environment-specific configurations
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                             │
-│                               GitHub Repository                             │
-│                                                                             │
-│  ┌───────────────┐   ┌───────────────┐   ┌───────────────┐                  │
-│  │  Terraform    │   │  Crossplane   │   │  Application  │                  │
-│  │  Workflow     │   │  Workflow     │   │  Workflow     │                  │
-│  └───────┬───────┘   └───────┬───────┘   └───────┬───────┘                  │
-│          │                   │                   │                          │
-└──────────┼───────────────────┼───────────────────┼──────────────────────────┘
-           │                   │                   │
-           ▼                   │                   │
-┌──────────────────┐           │                   │
-│                  │           │                   │
-│  Google Cloud    │           │                   │
-│  Platform        │           │                   │
-│                  │           │                   │
-│  ┌────────────┐  │           │                   │
-│  │ IAM        │  │           │                   │
-│  │ Service    │  │           │                   │
-│  │ Accounts   │  │           │                   │
-│  └────────────┘  │           │                   │
-│                  │           │                   │
-│  ┌────────────┐  │           │                   │
-│  │ Shared VPC │  │           │                   │
-│  │ Network    │  │           │                   │
-│  └────────────┘  │           │                   │
-│                  │           │                   │
-│  ┌────────────┐  │           │                   │
-│  │Infracluster│◄─┼───────────┘                   │
-│  │            │  │                               │
-│  │┌──────────┐│  │                               │
-│  ││Crossplane││  │                               │
-│  │└────┬─────┘│  │                               │
-│  └─────┼──────┘  │                               │
-│        │         │                               │
-│        ▼         │                               │
-│  ┌────────────┐  │                               │
-│  │ Dev GKE    │◄─┼──────────────────────┐        │
-│  │ Cluster    │  │                      │        │
-│  │            │  │                      │        │
-│  │┌──────────┐│  │                      │        │
-│  ││Hello     ││  │                      │        │
-│  ││World App ││  │                      │        │
-│  │└──────────┘│  │                      │        │
-│  └────────────┘  │                      │        │
-│                  │                      │        │
-│  ┌────────────┐  │                      │        │
-│  │ Staging    │◄─┼──────────────────────┼────────┘
-│  │ Cluster    │  │                      │
-│  │            │  │                      │
-│  │┌──────────┐│  │                      │
-│  ││Hello     ││  │                      │
-│  ││World App ││  │                      │
-│  │└──────────┘│  │                      │
-│  └────────────┘  │                      │
-│                  │                      │
-│  ┌────────────┐  │                      │
-│  │ Production │◄─┼──────────────────────┘
-│  │ Cluster    │  │
-│  │            │  │
-│  │┌──────────┐│  │
-│  ││Hello     ││  │
-│  ││World App ││  │
-│  │└──────────┘│  │
-│  └────────────┘  │
-│                  │
-└──────────────────┘
+┌─────────────────────────────────────────────┐
+│                                             │
+│       Host Project (shared-infra)           │
+│                                             │
+│  ┌─────────────────────────────────────────┐│
+│  │         Shared VPC Network              ││
+│  └───────────────┬─────────────────────────┘│
+│                  │                          │
+│  ┌───────────────┴───────────────────────┐  │
+│  │        Infracluster (GKE)             │  │
+│  │                                       │  │
+│  │  ┌────────────────────────────────┐   │  │
+│  │  │        Crossplane              │   │  │
+│  │  └────────────────────────────────┘   │  │
+│  └───────────────────────────────────────┘  │
+└─────────────────┬─────────────┬─────────────┘
+                  │             │
+                  │ VPC Peering │
+                  │             │
+┌─────────────────┴─────┐   ┌───┴───────────────────┐
+│                       │   │                       │
+│    Dev Project        │   │   Staging Project     │
+│                       │   │                       │
+│  ┌──────────────────┐ │   │ ┌──────────────────┐  │
+│  │    Dev VPC       │ │   │ │   Staging VPC    │  │
+│  └────────┬─────────┘ │   │ └────────┬─────────┘  │
+│           │           │   │          │            │
+│  ┌────────┴─────────┐ │   │ ┌────────┴─────────┐  │
+│  │   Dev Cluster    │ │   │ │  Staging Cluster │  │
+│  │                  │ │   │ │                  │  │
+│  │ ┌──────────────┐ │ │   │ │ ┌──────────────┐ │  │
+│  │ │ Applications │ │ │   │ │ │ Applications │ │  │
+│  │ └──────────────┘ │ │   │ │ └──────────────┘ │  │
+│  └──────────────────┘ │   │ └──────────────────┘  │
+└───────────────────────┘   └───────────────────────┘
+            │                           │
+            │       VPC Peering         │
+            │                           │
+            │                           │
+┌───────────┴───────────────────────────┴───┐
+│                                           │
+│          Production Project               │
+│                                           │
+│  ┌────────────────────────────────────┐   │
+│  │             Prod VPC               │   │
+│  └──────────────┬─────────────────────┘   │
+│                 │                         │
+│  ┌──────────────┴─────────────────────┐   │
+│  │        Production Cluster          │   │
+│  │                                    │   │
+│  │  ┌─────────────────────────────┐   │   │
+│  │  │        Applications         │   │   │
+│  │  └─────────────────────────────┘   │   │
+│  └────────────────────────────────────┘   │
+└───────────────────────────────────────────┘
 ```
 
 ## Repository Structure
@@ -159,52 +153,72 @@ CM-lab/
 
 ## Prerequisites
 
-- Google Cloud Platform account and project
+- Google Cloud Platform account with organization-level access
+- Ability to create and manage projects
 - GitHub repository with secrets configured
 - Local development tools:
-  - `gcloud` CLI (authenticated to your GCP project)
+  - `gcloud` CLI (authenticated to your GCP organization)
   - `kubectl` CLI
   - `helm` CLI
   - `terraform` CLI
 
 ## Quick Start
 
-### 1. Set Up Cloud Resources
+### 1. Set Up Google Cloud Projects
+
+First, set up the necessary GCP projects:
+
+1. **Host Project (shared-infra)**
+   - Will contain the shared VPC
+   - Will run the infracluster with Crossplane
+
+2. **Service Projects**
+   - Create separate projects for dev, staging, and production environments
+   - These projects will be attached to the shared VPC
 
 Run the provided setup script to create required GCP resources:
 
 ```bash
-./scripts/setup.sh
+./scripts/setup.sh --host-project your-host-project-id \
+  --service-projects your-dev-project-id,your-staging-project-id,your-prod-project-id
 ```
 
 This script will:
-1. Enable required GCP APIs
-2. Create service accounts for GitHub Actions and infrastructure
-3. Create a GCS bucket for Terraform state
-4. Provide instructions for GitHub secrets
+1. Enable required GCP APIs on all projects
+2. Create service accounts with appropriate permissions
+3. Set up the shared VPC in the host project
+4. Create a GCS bucket for Terraform state
+5. Provide instructions for GitHub secrets
 
 ### 2. Configure GitHub Secrets
 
 Add the following secrets to your GitHub repository:
 
-- `GCP_PROJECT_ID`: Your GCP project ID
+- `GCP_HOST_PROJECT_ID`: Your GCP host project ID
+- `GCP_PROJECT_ID`: Your GCP service project ID (initially for dev)
 - `GCP_SA_KEY`: Base64-encoded service account key (provided by the setup script)
 - `GCP_TERRAFORM_STATE_BUCKET`: GCS bucket name for Terraform state (provided by the setup script)
+- `GCP_DEV_PROJECT_ID`: Your development project ID
+- `GCP_STAGING_PROJECT_ID`: Your staging project ID
+- `GCP_PROD_PROJECT_ID`: Your production project ID
 
 ### 3. Deploy Infrastructure
 
 The project uses GitHub Actions workflows for deployment in the following sequence:
 
 1. **Terraform Infrastructure Deployment**
-   - Deploys the VPC, IAM, and infracluster GKE
-   - Uses Terraform to create foundational infrastructure
+   - Deploys the shared VPC in the host project
+   - Configures Shared VPC service project attachments
+   - Deploys the infracluster GKE in the host project
 
 2. **Crossplane Bootstrap**
    - Installs Crossplane on the infracluster
-   - Configures Crossplane providers and permissions
+   - Configures Crossplane providers for GCP with appropriate permissions
+   - Sets up custom resource definitions for managing GKE clusters
 
 3. **Provision Application Clusters**
-   - Uses Crossplane to provision application GKE clusters (dev, staging, prod)
+   - Uses Crossplane to provision application GKE clusters in service projects
+   - Clusters connect to the shared VPC in the host project
    - Automatically installs NGINX Ingress Controller and cert-manager as cluster add-ons
    - Configures Let's Encrypt Cluster Issuers for automated TLS
 
@@ -227,51 +241,102 @@ Before deploying, these placeholder values need replacement:
 | File | Placeholder | Replace With | Description |
 |------|-------------|-------------|-------------|
 | **Terraform Infrastructure** |
-| `infra/environments/dev/terraform.tfvars` | `your-gcp-project-id` | Your GCP project ID | The GCP project for all resources |
+| `infra/environments/dev/terraform.tfvars` | `your-gcp-project-id` | Your host GCP project ID | The host project for shared VPC |
+| `infra/environments/dev/terraform.tfvars` | `your-dev-project-id` | Your dev project ID | Service project for dev environment |
+| `infra/environments/dev/terraform.tfvars` | `your-staging-project-id` | Your staging project ID | Service project for staging environment |
+| `infra/environments/dev/terraform.tfvars` | `your-prod-project-id` | Your prod project ID | Service project for prod environment |
 | `infra/environments/dev/backend.tf` | `your-terraform-state-bucket` | Your GCS bucket name | From setup.sh output |
 | **Crossplane Configuration** |
-| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your GCP project ID | Used by Crossplane to provision GKE |
-| `crossplane/xresources/staging-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your GCP project ID | Used by Crossplane to provision GKE |
-| `crossplane/xresources/prod-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your GCP project ID | Used by Crossplane to provision GKE |
+| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your dev project ID | Service project for dev GKE |
+| `crossplane/xresources/dev-gke-cluster-claim.yaml` | `${GCP_HOST_PROJECT_ID}` | Your host project ID | Host project with shared VPC |
+| `crossplane/xresources/staging-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your staging project ID | Service project for staging GKE |
+| `crossplane/xresources/staging-gke-cluster-claim.yaml` | `${GCP_HOST_PROJECT_ID}` | Your host project ID | Host project with shared VPC |
+| `crossplane/xresources/prod-gke-cluster-claim.yaml` | `${GCP_PROJECT_ID}` | Your prod project ID | Service project for prod GKE |
+| `crossplane/xresources/prod-gke-cluster-claim.yaml` | `${GCP_HOST_PROJECT_ID}` | Your host project ID | Host project with shared VPC |
 | **Application Deployment** |
 | `workloads/hello-world/values.yaml` | `gcr.io/your-gcp-project-id/hello-world` | Your GCR image path | For container images |
 
-## Cluster Architecture
+## Google Cloud Architecture
 
-### Infracluster (Terraform-managed)
+### Multi-VPC Architecture with VPC Peering
 
-The infracluster is a small, efficient GKE cluster designed to host Crossplane:
+The platform uses a multi-VPC architecture with VPC peering to provide enhanced isolation with controlled connectivity:
 
-- **Size:** Zonal cluster with 1 node (autoscales to 3)
+1. **Shared VPC in Host Project**
+   - Houses the infracluster that runs Crossplane
+   - Managed by Terraform in the host project
+   - Acts as the central management hub for all clusters
+
+2. **Environment-Specific VPCs in Service Projects**
+   - Each environment (dev, staging, prod) has its own dedicated VPC
+   - Complete network isolation between environments
+   - Application clusters run in their respective VPCs
+   - Separate CIDR ranges for each environment to avoid overlap
+
+3. **VPC Peering Connections**
+   - Connects each environment VPC to the shared VPC
+   - Configured with Terraform's VPC peering resources
+   - Bi-directional route exchange for cross-VPC communication
+   - Enables the infracluster to manage application clusters across VPCs
+
+4. **Benefits of this Architecture**
+   - **Enhanced Security and Isolation:**
+     - Application environments completely isolated from each other
+     - Prevents unauthorized cross-environment access
+     - Simplifies compliance with security requirements
+   
+   - **Flexible Network Design:**
+     - Each environment can have custom network configurations
+     - Independent subnet and CIDR planning
+     - Environment-specific network policies
+   
+   - **Clear Resource Boundaries:**
+     - Clean separation between infrastructure and applications
+     - Different teams can manage different environments
+     - Enhanced security through project and network boundaries
+   
+   - **Scalable Administration:**
+     - Different IAM roles for infrastructure vs. application teams
+     - Reduced risk of accidental infrastructure changes
+     - Controlled access to production resources
+
+### Infracluster (in Host Project)
+
+The infracluster is a GKE cluster in the host project's shared VPC that runs Crossplane:
+
+- **Size:** Regional cluster with 1-3 nodes
 - **Machine Type:** e2-standard-2
-- **Disk:** 50GB standard persistent disk
-- **Cost Optimization:** Uses preemptible VMs
-- **Networking:** Private nodes with public control plane access
-- **Security:** Workload Identity enabled for GCP access
+- **Disk:** 50-100GB SSD persistent disk
+- **Networking:** Shared VPC with private nodes and VPC peering to all environment VPCs
+- **Security:** Workload Identity, Shielded Nodes, Binary Authorization
+- **Purpose:** Hosts Crossplane to manage application clusters across all environments
 
-### Application Clusters (Crossplane-managed)
+### Application Clusters (in Service Projects)
 
 Application clusters are provisioned by Crossplane running on the infracluster:
 
 #### Dev Cluster
-- **Size:** Regional cluster with 1 node (autoscales to 3)
+- **Project:** Development service project
+- **Size:** Zonal cluster with 1-3 nodes
 - **Machine Type:** e2-standard-2
 - **Disk:** 50GB standard persistent disk
-- **Networking:** Uses the same VPC as the infracluster
+- **Networking:** Uses its own VPC (dev-vpc) with peering to the shared VPC
 - **Environment:** Development and testing
 
 #### Staging Cluster
-- **Size:** Regional cluster with 2 nodes (autoscales to 5)
+- **Project:** Staging service project
+- **Size:** Regional cluster with 2-5 nodes
 - **Machine Type:** e2-standard-2
 - **Disk:** 70GB standard persistent disk
-- **Networking:** Uses the same VPC as the infracluster
+- **Networking:** Uses its own VPC (staging-vpc) with peering to the shared VPC
 - **Environment:** Pre-production validation
 
 #### Production Cluster
-- **Size:** Regional cluster with 3 nodes (autoscales to 7)
+- **Project:** Production service project
+- **Size:** Regional cluster with 3-7 nodes
 - **Machine Type:** e2-standard-4
 - **Disk:** 100GB SSD persistent disk
-- **Networking:** Uses the same VPC as the infracluster
+- **Networking:** Uses its own VPC (prod-vpc) with peering to the shared VPC
 - **Environment:** Production workloads
 - **Security:** Enhanced security configurations
 
@@ -299,6 +364,11 @@ The project follows a modular design philosophy:
    - Provider configurations for GCP integration
    - Cluster claims for different environments (dev, staging, prod)
 
+3. **Kubernetes Add-ons**
+   - Managed as Helm charts with environment-specific values
+   - Automated installation through workflows
+   - Standardized configuration across environments
+
 ## Troubleshooting
 
 ### Common Issues
@@ -306,14 +376,58 @@ The project follows a modular design philosophy:
 #### Workflow Failures
 - Check GitHub Actions logs for detailed error messages
 - Verify GitHub secrets are configured correctly
+- Ensure service accounts have appropriate permissions
 
 #### Crossplane Issues
 - Check Crossplane logs: `kubectl logs -l app=crossplane -n crossplane-system`
 - Verify provider configurations: `kubectl get providers -n crossplane-system`
+- Check provider status: `kubectl get providers.pkg.crossplane.io -A -o wide`
+
+#### VPC Peering Issues
+- Verify VPC peering status: `gcloud compute networks peerings list --network=shared-vpc --project=HOST_PROJECT_ID`
+- Check environment VPCs: `gcloud compute networks list --project=ENV_PROJECT_ID`
+- Verify peering connectivity: `gcloud compute networks peerings describe peering-shared-vpc-to-dev-vpc --network=shared-vpc --project=HOST_PROJECT_ID`
+- Check routes exchanged: `gcloud compute routes list --filter="network=shared-vpc" --project=HOST_PROJECT_ID`
+- Test connectivity between VPCs: Create temporary VMs in each VPC and use `ping` to verify network connectivity
+
+#### Shared VPC Issues
+- Verify service project attachment: `gcloud compute shared-vpc get-host-project SERVICE_PROJECT_ID`
+- Check subnets: `gcloud compute networks subnets list --network=shared-vpc --project=HOST_PROJECT_ID`
+- Verify service account permissions: `gcloud projects get-iam-policy HOST_PROJECT_ID`
 
 #### Cluster Provisioning
 - Check Crossplane claim status: `kubectl get gkecluster.platform.commercelab.io`
 - View detailed status: `kubectl describe gkecluster.platform.commercelab.io/dev-gke-cluster`
+- Check Crossplane events: `kubectl get events -n crossplane-system`
+
+## Security Considerations
+
+The platform includes multiple security features:
+
+1. **Network Security**
+   - Private GKE clusters with authorized networks
+   - Network policies for pod-to-pod communication
+   - Shared VPC with controlled access
+
+2. **Identity and Access Management**
+   - Workload Identity for GCP service access
+   - Least privilege service accounts
+   - Separate IAM roles by project and environment
+
+3. **Node Security**
+   - Shielded nodes for enhanced VM security
+   - Secure boot and integrity monitoring
+   - Node auto-upgrades for security patches
+
+4. **Workload Security**
+   - Binary Authorization (optional for production)
+   - Container image vulnerability scanning
+   - Secrets management via External Secrets Operator
+
+5. **Cluster Security**
+   - GKE enterprise security features
+   - Regular security scans
+   - Maintenance windows for updates
 
 ## Kubernetes Add-ons Architecture
 
@@ -339,7 +453,12 @@ The platform includes a comprehensive set of Kubernetes add-ons to enhance clust
    export KUBECONFIG=/path/to/your/kubeconfig.yaml
    
    # Run the comprehensive add-ons installation script
-   ./kubernetes-addons/install.sh [EMAIL] [GCP_PROJECT_ID] [GCP_SERVICE_ACCOUNT]
+   ./kubernetes-addons/install.sh \
+     --email admin@example.com \
+     --project your-gcp-project-id \
+     --service-account your-external-secrets-sa@your-gcp-project-id.iam.gserviceaccount.com \
+     --environment dev \
+     --cluster-name dev-gke-cluster
    ```
 
 ## Cleanup
@@ -347,15 +466,17 @@ The platform includes a comprehensive set of Kubernetes add-ons to enhance clust
 To remove all resources created by this project:
 
 ```bash
-./scripts/cleanup.sh
+./scripts/cleanup.sh --host-project your-host-project-id \
+  --service-projects your-dev-project-id,your-staging-project-id,your-prod-project-id
 ```
 
 This script will:
 1. Delete all application GKE clusters provisioned by Crossplane
 2. Delete the infracluster
 3. Delete IAM service accounts
-4. Clean up networking resources
-5. Optionally delete the Terraform state bucket
+4. Remove the shared VPC configuration
+5. Clean up networking resources
+6. Optionally delete the Terraform state bucket
 
 ## Contributing
 
