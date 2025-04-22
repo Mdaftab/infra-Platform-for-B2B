@@ -18,13 +18,12 @@ spec:
     startTime: "03:00"
     recurrence: "FREQ=WEEKLY;BYDAY=SA,SU"
   
-  # Network configuration - Use environment-specific VPC (connected to shared VPC via peering)
+  # Network configuration - Use shared VPC architecture
   networkConfig:
-    networkName: dev-vpc
+    hostProjectID: ${GCP_HOST_PROJECT_ID}
+    networkName: shared-vpc
     subnetName: dev-subnet
-    podCidrBlock: "10.32.0.0/16"  # Environment-specific pod CIDR
-    serviceCidrBlock: "10.33.0.0/20"  # Environment-specific service CIDR
-    # VPC peering to the shared VPC is already configured via Terraform
+    # Secondary ranges are defined in the shared VPC and referenced by name
   
   # Node configuration
   nodeConfig:

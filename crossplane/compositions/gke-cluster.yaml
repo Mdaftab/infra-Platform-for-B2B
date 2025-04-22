@@ -65,10 +65,10 @@ spec:
             monitoringService: monitoring.googleapis.com/kubernetes
             networkingMode: VPC_NATIVE
             removeDefaultNodePool: true
-            # IP allocation policy for VPC-native mode
+            # IP allocation policy for GKE in shared VPC - use named secondary ranges
             ipAllocationPolicy:
-              - clusterIpv4CidrBlock: $(spec.networkConfig.podCidrBlock)
-                servicesIpv4CidrBlock: $(spec.networkConfig.serviceCidrBlock)
+              - clusterSecondaryRangeName: "$(spec.networkConfig.subnetName)-pods"
+                servicesSecondaryRangeName: "$(spec.networkConfig.subnetName)-services"
             # Private cluster config
             privateClusterConfig:
               - enablePrivateNodes: $(spec.securityConfig.privateClusterConfig.enablePrivateNodes)
@@ -79,9 +79,9 @@ spec:
               - cidrBlocks:
                   - cidrBlock: $(spec.securityConfig.privateClusterConfig.masterAuthorizedNetworks[0].cidrBlock)
                     displayName: "Infracluster Subnet Access"
-            # Environment-specific VPC network references (same project)
-            network: projects/$(spec.projectID)/global/networks/$(spec.networkConfig.networkName)
-            subnetwork: projects/$(spec.projectID)/regions/$(spec.location)/subnetworks/$(spec.networkConfig.subnetName)
+            # Shared VPC references - host project with service project
+            network: projects/$(spec.networkConfig.hostProjectID)/global/networks/$(spec.networkConfig.networkName)
+            subnetwork: projects/$(spec.networkConfig.hostProjectID)/regions/$(spec.location)/subnetworks/$(spec.networkConfig.subnetName)
             releaseChannel:
               - channel: $(spec.releaseChannel)
             datapathProvider: ADVANCED_DATAPATH

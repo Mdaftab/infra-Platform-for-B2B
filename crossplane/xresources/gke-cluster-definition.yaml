@@ -73,26 +73,28 @@ spec:
                 
                 # Network Configuration
                 networkConfig:
-                  description: Configuration for the cluster's network (environment-specific VPC)
+                  description: Configuration for the cluster's network in the shared VPC
                   type: object
                   properties:
                     networkName:
-                      description: Name of the VPC network in the environment project
+                      description: Name of the shared VPC network
+                      type: string
+                      default: "shared-vpc"
+                    hostProjectID:
+                      description: The project ID of the shared VPC host project
                       type: string
                     subnetName:
-                      description: Name of the subnet in the environment-specific VPC
+                      description: Name of the environment subnet in the shared VPC
                       type: string
-                    podCidrBlock:
-                      description: CIDR block for pods in the cluster
+                    podRangeName:
+                      description: Secondary range name for pods in the shared VPC
                       type: string
-                    serviceCidrBlock:
-                      description: CIDR block for services in the cluster
+                    serviceRangeName:
+                      description: Secondary range name for services in the shared VPC
                       type: string
                   required:
-                    - networkName
                     - subnetName
-                    - podCidrBlock
-                    - serviceCidrBlock
+                    - hostProjectID
                 
                 # Node Configuration
                 nodeConfig:

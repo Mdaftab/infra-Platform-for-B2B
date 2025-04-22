@@ -148,3 +148,26 @@ variable "vpc_peerings" {
   }))
   default = {}
 }
+
+variable "subnet_iam_bindings" {
+  description = "IAM bindings for specific subnets in the shared VPC"
+  type = map(list(object({
+    role = string
+    members = list(string)
+  })))
+  default = {}
+}
+
+variable "firewall_rules" {
+  description = "Custom firewall rules to create for the VPC"
+  type = map(object({
+    description = string
+    source_ranges = list(string)
+    target_ranges = list(string)
+    allow = list(object({
+      protocol = string
+      ports = list(string)
+    }))
+  }))
+  default = {}
+}

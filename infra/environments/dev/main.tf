@@ -85,13 +85,16 @@ module "shared_vpc" {
   enable_flow_logs      = var.shared_vpc_config.enable_flow_logs
   create_nat_gateway    = var.shared_vpc_config.create_nat_gateway
   
-  # Shared VPC configuration
+  # Enhanced Shared VPC configuration
   is_shared_vpc_host    = var.shared_vpc_config.is_shared_vpc_host
   service_project_ids   = var.shared_vpc_config.service_project_ids
   shared_vpc_users      = local.shared_vpc_users
   
-  # VPC Peering configuration for environment-specific VPCs
-  vpc_peerings          = var.shared_vpc_config.vpc_peerings
+  # Subnet-level IAM bindings for fine-grained access control
+  subnet_iam_bindings   = lookup(var.shared_vpc_config, "subnet_iam_bindings", {})
+  
+  # Environment-specific firewall rules
+  firewall_rules        = lookup(var.shared_vpc_config, "firewall_rules", {})
   
   # Enable more secure networking by preventing destruction
   prevent_destroy       = true

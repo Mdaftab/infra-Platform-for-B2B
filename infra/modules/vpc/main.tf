@@ -193,3 +193,55 @@ resource "google_project_iam_member" "shared_vpc_users" {
   role    = each.value.role
   member  = "serviceAccount:${each.value.service_account}"
 }
+
+# Subnet-level IAM bindings for more granular access control
+resource "google_compute_subnetwork_iam_binding" "subnet_iam_bindings" {
+  for_each = var.is_shared_vpc_host ? {
+    for binding_pair in flatten([
+      for subnet_name, bindings in var.subnet_iam_bindings : [
+        for binding in bindings : {
+          subnet_name = subnet_name
+          role        = binding.role
+          members     = binding.members
+        }
+      ]
+    ]) : "${binding_pair.subnet_name}-${binding_pair.role}" => binding_pair
+  } : {}
+  
+  project     = var.project_id
+  region      = var.region
+  subnetwork  = google_compute_subnetwork.subnets[each.value.subnet_name].name
+  role        = each.value.role
+  members     = each.value.members
+  
+  depends_on = [
+    google_compute_shared_vpc_host_project.host,
+    google_compute_subnetwork.subnets
+  ]
+}
+
+# Custom firewall rules for environment isolation and connectivity
+resource "google_compute_firewall" "custom_rules" {
+  for_each    = var.firewall_rules
+  
+  name        = "${var.network_name}-${each.key}"
+  network     = google_compute_network.vpc.self_link
+  project     = var.project_id
+  description = each.value.description
+  priority    = 1000
+  
+  source_ranges = each.value.source_ranges
+  target_tags   = [] # Can be extended with target tags if needed
+  
+  dynamic "allow" {
+    for_each = each.value.allow
+    content {
+      protocol = allow.value.protocol
+      ports    = allow.value.ports
+    }
+  }
+  
+  log_config {
+    metadata = "INCLUDE_ALL_METADATA"
+  }
+}
