@@ -15,7 +15,65 @@ This platform allows you to create a central infrastructure cluster that can pro
 
 ## Architecture
 
-![Architecture Diagram](https://mermaid.ink/img/pako:eNqNkk1uwjAQha8yaVeVCuwgQAKR2LQFJAJS1VVXljOBURI7-AeKSe9e20QBsSh0Ztfx9-bNeObAEx8g5mKOfQZhI4x1IpuX6M5eUgU3jxgCRxXpbH-XZTumVp_aX3xCVjlCzwJNLDEi10_Iw1KhNoiMO7p8nXqT3GSQX4dstqEj89uyoZnfNbNJJgpvOI_Jb2VC-mZCrz8cLEdPN6XWW9cV5qwuCHcNHCPvofQnJDhDx9RqhGgmZCzwq4a0r2QkVH5I6B-iWZX5F4FXwVrREvQVoQTdIsS-dZL6I5Xwgj_r5aZdTyT2bPkL5ZEp26BQEq1kXpW5-e2jqCM8Hmc95pQkNscKUqokdXwI3TKlT1SfwIdaKFqgXbDUK3QpR9f1jlVn6Nq-Z7u3pYc4mwZcrGynL91e5thOsJg6HctzFnDgXpCNUJfBgUoNh0fT6hjBCOCHqZaGQ-QHrhd0Onau0MtKDsqyy2GVGkIV-DGrUK41TLhw44x7Mfczd_Efk4fNcw?type=png)
+```
+                     Host Project
+┌────────────────────────────────────────────────┐
+│                                                │
+│  ┌─────────────────────────────────────────┐   │
+│  │            Shared VPC Network           │   │
+│  │                                         │   │
+│  │   ┌───────┐ ┌─────┐ ┌───────┐ ┌─────┐   │   │
+│  │   │ Infra  │ │ Dev  │ │Staging│ │Prod │   │   │
+│  │   │ Subnet│ │Subnet│ │Subnet │ │Subnet│   │   │
+│  │   └───┬───┘ └──┬───┘ └───┬───┘ └──┬───┘   │   │
+│  │       │        │         │        │       │   │
+│  │   ┌───┴───┐    │         │        │       │   │
+│  │   │Infra-  │    │         │        │       │   │
+│  │   │cluster │    │         │        │       │   │
+│  │   │        │    │         │        │       │   │
+│  │   │Crossplane   │         │        │       │   │
+│  │   └───────┘    │         │        │       │   │
+│  │                │         │        │       │   │
+│  │   ┌────────────┴─────────┴────────┴───┐   │   │
+│  │   │    Database Subnet (Reserved)     │   │   │
+│  │   └────────────────────────────────────┘   │   │
+│  └─────────────────────────────────────────┘   │
+└────────┬─────────────┬───────────┬─────────────┘
+         │             │           │
+┌────────┴────┐ ┌──────┴────┐ ┌────┴─────┐
+│ Dev Project │ │  Staging  │ │  Prod    │
+│             │ │  Project  │ │  Project │
+│ ┌─────────┐ │ │ ┌────────┐│ │┌────────┐│
+│ │Dev GKE  │ │ │ │Staging ││ ││Prod GKE││
+│ │Cluster  │ │ │ │GKE     ││ ││Cluster ││
+│ │         │ │ │ │Cluster ││ ││        ││
+│ └─────────┘ │ │ └────────┘│ │└────────┘│
+└─────────────┘ └───────────┘ └──────────┘
+```
+
+### How It Works
+
+```
++-----------------+
+| GitHub Actions  |  --> Triggers deployments via CI/CD
++-----------------+
+        |
+        v
++-----------------+
+| Terraform Code  |  --> Provisions the infrastructure
++-----------------+
+        |
+        v
++------------------------------------+
+| Infracluster with Crossplane       |  --> Central management cluster
++------------------------------------+
+        |
+        | Creates and manages
+        v
++--------------------------------------------------+
+| Application Clusters (Dev/Staging/Production)    |  --> Run workloads
++--------------------------------------------------+
+```
 
 ### Components:
 
@@ -179,16 +237,31 @@ Each environment has its own dedicated GKE cluster:
 
 The shared VPC is configured with these subnets:
 
-| Subnet | CIDR Range | Purpose |
-|--------|------------|---------|
-| Infra Subnet | 10.0.0.0/20 | Infrastructure cluster |
-| Dev Subnet | 10.20.0.0/20 | Development environment |
-| Staging Subnet | 10.40.0.0/20 | Staging environment |
-| Prod Subnet | 10.60.0.0/20 | Production environment |
-| DB Subnet | 10.80.0.0/20 | Future database deployments |
-| Proxy Subnet | 10.0.16.0/22 | External-facing services |
+```
+Shared VPC Network (10.0.0.0/8)
+│
+├── 10.0.0.0/20    - Infra Subnet      - For Infracluster
+│   ├── 10.16.0.0/16  - Pod CIDR         - For Infracluster Pods
+│   └── 10.17.0.0/20  - Service CIDR     - For Infracluster Services
+│
+├── 10.20.0.0/20   - Dev Subnet        - For Dev Cluster
+│   ├── 10.32.0.0/16  - Pod CIDR         - For Dev Pods
+│   └── 10.33.0.0/20  - Service CIDR     - For Dev Services  
+│
+├── 10.40.0.0/20   - Staging Subnet    - For Staging Cluster
+│   ├── 10.48.0.0/16  - Pod CIDR         - For Staging Pods
+│   └── 10.49.0.0/20  - Service CIDR     - For Staging Services
+│
+├── 10.60.0.0/20   - Prod Subnet       - For Prod Cluster
+│   ├── 10.64.0.0/16  - Pod CIDR         - For Prod Pods
+│   └── 10.65.0.0/20  - Service CIDR     - For Prod Services
+│
+├── 10.80.0.0/20   - DB Subnet         - For Future Databases
+│
+└── 10.0.16.0/22   - Proxy Subnet      - For External Services
+```
 
-Each subnet has dedicated secondary ranges for GKE pods and services.
+This carefully planned IP address allocation ensures no conflicts between environments.
 
 ## Advanced Features
 
