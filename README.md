@@ -16,60 +16,61 @@ This platform allows you to create a central infrastructure cluster that can pro
 ## Architecture
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 40, 'padding': 10 }}}%%
 graph TB
-    subgraph "Host Project"
-        subgraph "Shared VPC Network"
-            InfraSubnet["Infra Subnet"]
-            DevSubnet["Dev Subnet"]
-            StagingSubnet["Staging Subnet"]
-            ProdSubnet["Prod Subnet"]
-            DBSubnet["Database Subnet<br/>(Reserved)"]
+    subgraph HP[Host Project]
+        subgraph VPC[Shared VPC Network]
+            direction TB
+            IS[Infra Subnet]
+            DS[Dev Subnet]
+            SS[Staging Subnet]
+            PS[Prod Subnet]
+            DBS[DB Subnet]
+            IC[Infra Cluster<br>Crossplane]
             
-            InfraCluster["Infrastructure Cluster<br/>with Crossplane"]
-            
-            InfraSubnet --> InfraCluster
+            IS --> IC
         end
     end
     
-    subgraph "Service Projects"
-        DevProject["Dev Project"]
-        StagingProject["Staging Project"]
-        ProdProject["Prod Project"]
-        
-        DevCluster["Dev GKE Cluster"]
-        StagingCluster["Staging GKE Cluster"]
-        ProdCluster["Prod GKE Cluster"]
-        
-        DevProject --> DevCluster
-        StagingProject --> StagingCluster
-        ProdProject --> ProdCluster
+    subgraph SP[Service Projects]
+        direction TB
+        DP[Dev Project] --> DC[Dev GKE]
+        StP[Staging Project] --> SC[Staging GKE]
+        PP[Prod Project] --> PC[Prod GKE]
     end
     
-    InfraCluster --> DevCluster
-    InfraCluster --> StagingCluster
-    InfraCluster --> ProdCluster
+    IC --> DC
+    IC --> SC
+    IC --> PC
     
-    DevSubnet -.-> DevCluster
-    StagingSubnet -.-> StagingCluster
-    ProdSubnet -.-> ProdCluster
+    DS -.-> DC
+    SS -.-> SC
+    PS -.-> PC
     
-    style Host Project fill:#f5f5f5,stroke:#333,stroke-width:2px
-    style Shared VPC Network fill:#e1f5fe,stroke:#333,stroke-width:1px
-    style Service Projects fill:#f5f5f5,stroke:#333,stroke-width:2px
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef vpc fill:#e1f5fe,stroke:#333,stroke-width:1px;
+    classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    
+    class HP,SP default;
+    class VPC vpc;
+    class IC,DC,SC,PC cluster;
 ```
 
 ### How It Works
 
 ```mermaid
+%%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 30, 'rankSpacing': 30 }}}%%
 flowchart TD
-    A["GitHub Actions"] -->|"Triggers deployments"| B["Terraform Code"]
-    B -->|"Provisions"| C["Infrastructure Cluster<br/>with Crossplane"]
-    C -->|"Creates & Manages"| D["Application Clusters<br/>(Dev/Staging/Production)"]
+    A[GitHub Actions] -->|Deploy| B[Terraform Code]
+    B -->|Provision| C[Infra Cluster<br>Crossplane]
+    C -->|Manage| D[App Clusters<br>Dev/Staging/Prod]
     
-    style A fill:#f9f,stroke:#333,stroke-width:2px
-    style B fill:#bbf,stroke:#333,stroke-width:2px
-    style C fill:#dfd,stroke:#333,stroke-width:2px
-    style D fill:#ffd,stroke:#333,stroke-width:2px
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef action fill:#e1f5fe,stroke:#333,stroke-width:1px;
+    classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    
+    class A action;
+    class B,C,D cluster;
 ```
 
 ### Components:
