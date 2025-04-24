@@ -15,64 +15,61 @@ This platform allows you to create a central infrastructure cluster that can pro
 
 ## Architecture
 
-```
-                     Host Project
-┌────────────────────────────────────────────────┐
-│                                                │
-│  ┌─────────────────────────────────────────┐   │
-│  │            Shared VPC Network           │   │
-│  │                                         │   │
-│  │   ┌───────┐ ┌─────┐ ┌───────┐ ┌─────┐   │   │
-│  │   │ Infra  │ │ Dev  │ │Staging│ │Prod │   │   │
-│  │   │ Subnet│ │Subnet│ │Subnet │ │Subnet│   │   │
-│  │   └───┬───┘ └──┬───┘ └───┬───┘ └──┬───┘   │   │
-│  │       │        │         │        │       │   │
-│  │   ┌───┴───┐    │         │        │       │   │
-│  │   │Infra-  │    │         │        │       │   │
-│  │   │cluster │    │         │        │       │   │
-│  │   │        │    │         │        │       │   │
-│  │   │Crossplane   │         │        │       │   │
-│  │   └───────┘    │         │        │       │   │
-│  │                │         │        │       │   │
-│  │   ┌────────────┴─────────┴────────┴───┐   │   │
-│  │   │    Database Subnet (Reserved)     │   │   │
-│  │   └────────────────────────────────────┘   │   │
-│  └─────────────────────────────────────────┘   │
-└────────┬─────────────┬───────────┬─────────────┘
-         │             │           │
-┌────────┴────┐ ┌──────┴────┐ ┌────┴─────┐
-│ Dev Project │ │  Staging  │ │  Prod    │
-│             │ │  Project  │ │  Project │
-│ ┌─────────┐ │ │ ┌────────┐│ │┌────────┐│
-│ │Dev GKE  │ │ │ │Staging ││ ││Prod GKE││
-│ │Cluster  │ │ │ │GKE     ││ ││Cluster ││
-│ │         │ │ │ │Cluster ││ ││        ││
-│ └─────────┘ │ │ └────────┘│ │└────────┘│
-└─────────────┘ └───────────┘ └──────────┘
+```mermaid
+graph TB
+    subgraph "Host Project"
+        subgraph "Shared VPC Network"
+            InfraSubnet["Infra Subnet"]
+            DevSubnet["Dev Subnet"]
+            StagingSubnet["Staging Subnet"]
+            ProdSubnet["Prod Subnet"]
+            DBSubnet["Database Subnet<br/>(Reserved)"]
+            
+            InfraCluster["Infrastructure Cluster<br/>with Crossplane"]
+            
+            InfraSubnet --> InfraCluster
+        end
+    end
+    
+    subgraph "Service Projects"
+        DevProject["Dev Project"]
+        StagingProject["Staging Project"]
+        ProdProject["Prod Project"]
+        
+        DevCluster["Dev GKE Cluster"]
+        StagingCluster["Staging GKE Cluster"]
+        ProdCluster["Prod GKE Cluster"]
+        
+        DevProject --> DevCluster
+        StagingProject --> StagingCluster
+        ProdProject --> ProdCluster
+    end
+    
+    InfraCluster --> DevCluster
+    InfraCluster --> StagingCluster
+    InfraCluster --> ProdCluster
+    
+    DevSubnet -.-> DevCluster
+    StagingSubnet -.-> StagingCluster
+    ProdSubnet -.-> ProdCluster
+    
+    style Host Project fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style Shared VPC Network fill:#e1f5fe,stroke:#333,stroke-width:1px
+    style Service Projects fill:#f5f5f5,stroke:#333,stroke-width:2px
 ```
 
 ### How It Works
 
-```
-+-----------------+
-| GitHub Actions  |  --> Triggers deployments via CI/CD
-+-----------------+
-        |
-        v
-+-----------------+
-| Terraform Code  |  --> Provisions the infrastructure
-+-----------------+
-        |
-        v
-+------------------------------------+
-| Infracluster with Crossplane       |  --> Central management cluster
-+------------------------------------+
-        |
-        | Creates and manages
-        v
-+--------------------------------------------------+
-| Application Clusters (Dev/Staging/Production)    |  --> Run workloads
-+--------------------------------------------------+
+```mermaid
+flowchart TD
+    A["GitHub Actions"] -->|"Triggers deployments"| B["Terraform Code"]
+    B -->|"Provisions"| C["Infrastructure Cluster<br/>with Crossplane"]
+    C -->|"Creates & Manages"| D["Application Clusters<br/>(Dev/Staging/Production)"]
+    
+    style A fill:#f9f,stroke:#333,stroke-width:2px
+    style B fill:#bbf,stroke:#333,stroke-width:2px
+    style C fill:#dfd,stroke:#333,stroke-width:2px
+    style D fill:#ffd,stroke:#333,stroke-width:2px
 ```
 
 ### Components:
