@@ -128,7 +128,7 @@ graph TB
 ```mermaid
 %%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 30, 'rankSpacing': 30 }}}%%
 flowchart TD
-    A[GitHub Actions] -->|Deploy| B[Terraform Code]
+    A[Central GitHub Actions] -->|Deploy| B[Terraform Code]
     B -->|Provision| C[Infra Cluster<br>Crossplane]
     
     C -->|Manage| D[Internal Clusters<br>Dev/Staging/Prod]
@@ -136,18 +136,57 @@ flowchart TD
     
     F[Client Onboarding<br>Script] -->|Create Cluster Claim| G[Client GKE Cluster]
     F -->|Create Database Claim| H[Client Cloud SQL]
+    F -->|Create GitHub Project| J[Client GitHub<br>Repository]
     
-    G -->|Deploy| I[Client Workloads]
+    G -->|Access Credentials| J
+    J -->|Deploy| I[Client Workloads]
     H -->|Connect to| I
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef action fill:#e1f5fe,stroke:#333,stroke-width:1px;
     classDef infra fill:#e8f5e9,stroke:#333,stroke-width:1px;
     classDef client fill:#fff0f5,stroke:#333,stroke-width:1px;
+    classDef github fill:#FEEFED,stroke:#333,stroke-width:1px;
     
-    class A,F action;
+    class A action;
     class B,C,D infra;
     class E,G,H,I client;
+    class F,J github;
+```
+
+#### GitHub Integration Workflow
+
+```mermaid
+%%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 30, 'rankSpacing': 30 }}}%%
+flowchart LR
+    A[GitHub Organization] -->|Contains| B[Central<br>Infrastructure Repo]
+    A -->|Contains| C[Client Projects]
+    
+    B -->|Manages| D[Infrastructure<br>Resources]
+    
+    C -->|Client A| E[Client A<br>Repository]
+    C -->|Client B| F[Client B<br>Repository]
+    C -->|Client C| G[Client C<br>Repository]
+    
+    E -->|Deploy to| H[Client A<br>GKE Cluster]
+    F -->|Deploy to| I[Client B<br>GKE Cluster]
+    G -->|Deploy to| J[Client C<br>GKE Cluster]
+    
+    K[Client Onboarding<br>Script] -->|Creates| C
+    K -->|Sets Up| L[CI/CD Pipelines]
+    
+    L -->|Configured for| E
+    L -->|Configured for| F
+    L -->|Configured for| G
+    
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef github fill:#FEEFED,stroke:#333,stroke-width:1px;
+    classDef infra fill:#e1f5fe,stroke:#333,stroke-width:1px;
+    classDef client fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    
+    class A,B,C,E,F,G,L github;
+    class D,K infra;
+    class H,I,J client;
 ```
 
 ### Components:
@@ -193,9 +232,16 @@ flowchart TD
    - Automated backups and high availability options
    - Independent scaling without affecting other clients
 
-5. **Management**
+5. **GitHub Integration**
+   - Dedicated GitHub project per client in the organization
+   - Client-specific repository with application code
+   - Automated CI/CD pipeline for deployment
+   - Separation of concerns between infrastructure and application code
+   - Self-service client application management
+
+6. **Management**
    - All client resources provisioned and managed by Crossplane
-   - Automated client onboarding through CLI scripts
+   - Complete client onboarding automation (infrastructure + code)
    - Centralized monitoring with client-specific dashboards
    - Role-based access control for client administrators
 
@@ -574,9 +620,29 @@ The architecture supports unlimited clusters without any networking constraints.
 
 The platform supports two approaches for B2B client onboarding, with the recommended approach being dedicated projects with isolated VPCs for maximum tenant separation.
 
-### Approach 1: Dedicated Project with Isolated VPC (Recommended)
+### One-Command Client Onboarding
 
-This approach provisions a completely isolated environment for each client, with dedicated GCP project, VPC, GKE cluster, and database.
+For the fastest onboarding experience, use the comprehensive onboarding script:
+
+```bash
+./scripts/onboard-client.sh
+```
+
+This script automates the entire process, including:
+- GCP project creation
+- API enablement
+- Service account setup
+- GKE cluster provisioning with dedicated VPC
+- Cloud SQL database provisioning (optional)
+- GitHub repository and project creation
+- CI/CD pipeline configuration
+- Kubernetes add-on installation
+
+The script will prompt you for all necessary information and execute each step in sequence.
+
+### Approach 1: Dedicated Project with Isolated VPC & GitHub Integration (Recommended)
+
+This approach provisions a completely isolated environment for each client, with dedicated GCP project, VPC, GKE cluster, and database. It also creates a GitHub project and repository for client application deployment.
 
 #### 1. Set Up Client GCP Project
 
@@ -619,7 +685,23 @@ This script will:
 - Optionally set up a dedicated Cloud SQL database
 - Apply the claim to Crossplane for provisioning
 
-#### 3. Configure Client Cluster
+#### 3. Set Up GitHub Project and Repository for Client
+
+Create a GitHub project and repository for the client's InfraSearch deployment:
+
+```bash
+# Create GitHub project, repository, and CI/CD pipeline
+./scripts/setup-github-client.sh "infrasearch" "CLIENT_NAME" "CLIENT_DESCRIPTION" "infrasearch/client-template"
+```
+
+This script will:
+- Create a GitHub project in your organization for tracking client work
+- Create a repository from a template with application code
+- Set up GitHub Actions secrets for cluster access
+- Configure CI/CD pipelines for automatic deployment
+- Provide documentation for client application management
+
+#### 4. Configure Client Cluster
 
 After the cluster is provisioned, install the necessary add-ons:
 
@@ -635,17 +717,29 @@ gcloud container clusters get-credentials CLIENT_NAME-gke-cluster \
 ./scripts/install-addons-gitops.sh
 ```
 
-#### 4. Deploy Client Applications
+#### 5. Deploy Client Applications via GitHub
 
-Finally, deploy the client's applications to their dedicated cluster:
+The client's applications will be automatically deployed from GitHub to their dedicated cluster:
 
-```bash
-# Deploy client application using Helm
-helm upgrade --install CLIENT_NAME-app ./workloads/hello-world \
-  --namespace default \
-  --set environment=production \
-  --set client=CLIENT_NAME
-```
+1. Clone the client repository:
+   ```bash
+   gh repo clone infrasearch/CLIENT_NAME
+   ```
+
+2. Make changes to the application code
+
+3. Push to the main branch to trigger deployment:
+   ```bash
+   git add .
+   git commit -m "Update application configuration"
+   git push origin main
+   ```
+
+4. The GitHub Actions workflow will automatically:
+   - Build a Docker image for the application
+   - Push it to Google Container Registry
+   - Deploy it to the client's GKE cluster
+   - Verify the deployment
 
 ### Approach 2: Shared VPC Architecture (Alternative)
 
