@@ -1,0 +1,99 @@
+---
+# Basic security policy: require pod resource limits
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-pod-resource-limits
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: validate-resources
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Pod resource limits are required"
+      pattern:
+        spec:
+          containers:
+          - resources:
+              limits:
+                cpu: "?*"
+                memory: "?*"
+---
+# Basic security policy: disallow privileged containers
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+  - name: privileged-containers
+    match:
+      resources:
+        kinds:
+        - Pod
+    validate:
+      message: "Privileged containers are not allowed"
+      pattern:
+        spec:
+          containers:
+          - name: "*"
+            =(securityContext):
+              =(privileged): "false"
+---
+# Auto-generate network policies
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-networkpolicy
+spec:
+  background: true
+  rules:
+  - name: add-networkpolicy-for-namespace
+    match:
+      resources:
+        kinds:
+        - Namespace
+    generate:
+      kind: NetworkPolicy
+      name: default-deny-ingress
+      namespace: "{{request.object.metadata.name}}"
+      synchronize: true
+      data:
+        spec:
+          podSelector: {}
+          policyTypes:
+          - Ingress
+          ingress:
+          - from:
+            - namespaceSelector:
+                matchLabels:
+                  kubernetes.io/metadata.name: kube-system
+---
+# Require secure TLS versions in Ingress
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-tls-ingress
+spec:
+  validationFailureAction: Audit  # Start in audit mode and switch to enforce later
+  background: true
+  rules:
+  - name: ingress-tls
+    match:
+      resources:
+        kinds:
+        - Ingress
+    validate:
+      message: "Ingress resources must specify TLS"
+      pattern:
+        spec:
+          tls:
+          - hosts:
+            - "?*"
+            secretName: "?*"

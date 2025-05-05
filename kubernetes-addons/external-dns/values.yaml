@@ -1,0 +1,73 @@
+# External DNS Helm Values
+# Automatically manages DNS records for Kubernetes Ingresses
+
+# Provider-specific configuration
+provider: google
+google:
+  project: "${GCP_PROJECT_ID}"
+  serviceAccountSecret: external-dns-gcp-sa
+
+# Set DNS records to be managed by this controller
+domainFilters: 
+  - "${ROOT_DOMAIN}"  # For example: example.com
+zoneIdFilters: []
+annotationFilter: ""
+labelFilter: ""
+
+# Policy defines how DNS records are synchronized between sources and providers
+policy: sync
+registry: txt
+txtOwnerId: "${CLUSTER_NAME}"
+txtPrefix: "external-dns-"
+
+# Configure main arguments
+interval: "1m"
+triggerLoopOnEvent: true
+
+# Enable service and pod sources
+sources:
+  - service
+  - ingress
+  - istio-gateway
+
+# Enable dry run mode if needed
+dryRun: false
+
+# Resource limits
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# Enable metrics for Prometheus
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus
+
+# Security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 65534
+  capabilities:
+    drop: ["ALL"]
+
+# Service account
+serviceAccount:
+  create: true
+  name: "external-dns"
+  annotations:
+    iam.gke.io/gcp-service-account: "external-dns-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 65534
+  runAsUser: 65534
+  runAsNonRoot: true

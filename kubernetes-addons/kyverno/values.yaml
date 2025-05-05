@@ -1,0 +1,77 @@
+# Kyverno Helm Values
+# This installs Kyverno for policy management
+
+replicaCount: 1
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# Enable policy reports
+policyReports:
+  enabled: true
+
+# Enable resource validation
+admissionController:
+  replicas: 1
+  rbac:
+    serviceAccount:
+      name: kyverno-service-account
+  createSelfSignedCert: true
+  metrics:
+    enabled: true
+    service:
+      port: 8000
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 1000m
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+# Configuration for background scanning
+backgroundController:
+  enabled: true
+  rbac:
+    serviceAccount:
+      name: kyverno-background-controller
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 1000m
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+# Configure reports controller
+reportsController:
+  enabled: true
+  rbac:
+    serviceAccount:
+      name: kyverno-reports-controller
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 1000m
+    requests:
+      memory: 256Mi
+      cpu: 100m
+
+# Configure cleanup controller
+cleanupController:
+  enabled: true
+  rbac:
+    serviceAccount:
+      name: kyverno-cleanup-controller
+  resources:
+    limits:
+      memory: 512Mi
+      cpu: 1000m
+    requests:
+      memory: 256Mi
+      cpu: 100m

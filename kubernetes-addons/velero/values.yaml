@@ -1,0 +1,93 @@
+# Velero Helm Values
+# Backup and recovery for Kubernetes clusters
+
+# Configure image
+image:
+  repository: velero/velero
+  tag: v1.11.0
+  pullPolicy: IfNotPresent
+
+# Enable server-side features
+initContainers:
+- name: velero-plugin-for-gcp
+  image: velero/velero-plugin-for-gcp:v1.6.0
+  imagePullPolicy: IfNotPresent
+  volumeMounts:
+  - mountPath: /target
+    name: plugins
+
+# Resource limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi
+
+# Schedule snapshots
+schedules:
+  daily-backup:
+    schedule: "0 1 * * *"  # Daily at 1 AM
+    template:
+      ttl: "240h"  # 10 days
+      includedNamespaces:
+      - "*"
+      excludedNamespaces:
+      - kube-system
+      - velero
+      includedResources:
+      - "*"
+      excludedResources:
+      - "nodes"
+      - "events"
+      - "events.events.k8s.io"
+      - "backups.velero.io"
+      - "restores.velero.io"
+      - "resticrepositories.velero.io"
+      includeClusterResources: true
+      storageLocation: default
+      volumeSnapshotLocations:
+      - gcp
+
+# Configure backups
+deployRestic: true
+restic:
+  podVolumePath: /var/lib/kubelet/pods
+  privileged: true
+
+# Configure metrics
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    additionalLabels:
+      release: prometheus
+
+# Configuration for backup storage
+configuration:
+  provider: gcp
+  backupStorageLocation:
+    name: default
+    provider: gcp
+    bucket: ${BACKUP_BUCKET}
+    prefix: backups
+    config:
+      project: ${GCP_PROJECT_ID}
+  volumeSnapshotLocation:
+    name: gcp
+    provider: gcp
+    config:
+      project: ${GCP_PROJECT_ID}
+      snapshotLocation: ${GCP_REGION}
+
+# Plugin credentials
+credentials:
+  useSecret: true
+  existingSecret: velero-service-account
+
+# For GCP integration
+serviceAccount:
+  server:
+    create: true
+    name: velero

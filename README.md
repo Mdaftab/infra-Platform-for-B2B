@@ -25,6 +25,8 @@ graph TB
             DS[Dev Subnet]
             SS[Staging Subnet]
             PS[Prod Subnet]
+            CS1[Client A Subnet]
+            CS2[Client B Subnet]
             DBS[DB Subnet]
             IC[Infra Cluster<br>Crossplane]
             
@@ -37,23 +39,31 @@ graph TB
         DP[Dev Project] --> DC[Dev GKE]
         StP[Staging Project] --> SC[Staging GKE]
         PP[Prod Project] --> PC[Prod GKE]
+        CP1[Client A Project] --> CC1[Client A GKE]
+        CP2[Client B Project] --> CC2[Client B GKE]
     end
     
     IC --> DC
     IC --> SC
     IC --> PC
+    IC --> CC1
+    IC --> CC2
     
     DS -.-> DC
     SS -.-> SC
     PS -.-> PC
+    CS1 -.-> CC1
+    CS2 -.-> CC2
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef vpc fill:#e1f5fe,stroke:#333,stroke-width:1px;
     classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    classDef client fill:#fff0f5,stroke:#333,stroke-width:1px;
     
     class HP,SP default;
     class VPC vpc;
     class IC,DC,SC,PC cluster;
+    class CS1,CS2,CP1,CP2,CC1,CC2 client;
 ```
 
 ### How It Works
@@ -64,13 +74,21 @@ flowchart TD
     A[GitHub Actions] -->|Deploy| B[Terraform Code]
     B -->|Provision| C[Infra Cluster<br>Crossplane]
     C -->|Manage| D[App Clusters<br>Dev/Staging/Prod]
+    C -->|Manage| E[Client Clusters<br>Client A/B/C]
+    
+    F[Scripts] -->|Add Client| G[Terraform Updates]
+    F -->|Create Cluster| H[Crossplane Claims]
+    G -->|Update| B
+    H -->|Apply to| C
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef action fill:#e1f5fe,stroke:#333,stroke-width:1px;
     classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    classDef client fill:#fff0f5,stroke:#333,stroke-width:1px;
     
     class A action;
     class B,C,D cluster;
+    class E,F,G,H client;
 ```
 
 ### Components:
@@ -81,22 +99,32 @@ flowchart TD
      - Development (10.20.0.0/20)
      - Staging (10.40.0.0/20)
      - Production (10.60.0.0/20)
+     - Client-specific subnets (10.X.0.0/20) - Dynamically allocated
      - Database (10.80.0.0/20)
 
 2. **Infrastructure Cluster**
    - Located in the Host Project
    - Runs Crossplane for managing application clusters
-   - Provides centralized management
+   - Provides centralized management for both internal and client clusters
+   - Handles cluster lifecycle for all environments
 
 3. **Service Projects**
-   - Dev, Staging, and Production projects
+   - Dev, Staging, and Production projects (internal environments)
+   - Client-specific projects (B2B environments)
    - Each has its own application cluster
-   - All use subnets from the shared VPC
+   - All use subnets from the shared VPC with proper IAM bindings
 
 4. **Application Clusters**
    - Located in their respective service projects
    - Run application workloads in isolated environments
    - Managed by Crossplane from the infrastructure cluster
+
+5. **Client Clusters**
+   - Dedicated GKE clusters for B2B clients
+   - Complete isolation between clients
+   - Custom API enablement per client
+   - Flexible resource allocation based on client needs
+   - Created using automated scripts for consistency
 
 ## Getting Started
 
@@ -214,7 +242,8 @@ CM-lab/
 └── scripts/                          # Utility scripts
     ├── setup.sh                      # Platform setup script
     ├── cleanup.sh                    # Platform cleanup script
-    ├── install-cluster-addons.sh     # Install Kubernetes add-ons
+    ├── install-cluster-addons.sh     # Install Kubernetes add-ons (script-based)
+    ├── install-addons-gitops.sh      # Install Kubernetes add-ons (GitOps-based)
     ├── add-client-subnet.sh          # Add subnet for new client
     └── create-client-cluster.sh      # Create client-specific cluster
 ```
@@ -306,23 +335,146 @@ To add a database, simply deploy it to the database subnet (10.80.0.0/20) and co
 
 ### Kubernetes Add-ons
 
-All application clusters include these pre-configured add-ons:
+All application clusters include these pre-configured add-ons with flexible installation options:
 
 1. **NGINX Ingress Controller**
    - Manages incoming traffic to applications
    - Provides load balancing and routing
+   - Auto-configures with Let's Encrypt for TLS
+   - High-performance ingress with custom annotations support
 
-2. **cert-manager**
+2. **cert-manager with Let's Encrypt Integration**
    - Automates TLS certificate management
    - Integrates with Let's Encrypt for free certificates
+   - Handles certificate renewal and rotation automatically
+   - Configured with ClusterIssuers for production and staging
+   - Automatic HTTP-01 challenge resolution via NGINX Ingress
+   - Zero-touch certificate management with auto-renewal before expiration
+   - Certificate status monitoring via Prometheus metrics
 
 3. **Reloader**
    - Automatically restarts pods when configs change
    - No manual intervention needed for updates
+   - Monitors configmaps and secrets for changes
+   - Supports annotation-based configuration
 
 4. **External Secrets Operator**
    - Integrates with GCP Secret Manager
    - Securely provides secrets to applications
+   - Handles automatic rotation of credentials
+   - Centralized secrets management with versioning
+
+5. **Prometheus & Grafana Stack**
+   - Comprehensive monitoring solution with preconfigured alerts
+   - Pre-configured dashboards for GKE monitoring and application metrics
+   - Alert management with configurable notification channels
+   - Built-in visualization of cluster metrics
+   - Long-term metrics storage with optimized retention policies
+
+6. **Kyverno Policy Management**
+   - Kubernetes-native policy engine
+   - Enforces security best practices
+   - Automatically applies network policies
+   - Resource quota enforcement
+   - Validates security contexts and pod configurations
+
+7. **Istio Service Mesh**
+   - Advanced traffic management with fine-grained routing
+   - Comprehensive observability and distributed tracing
+   - Security features including mTLS between services
+   - API gateway capabilities with JWT validation
+   - Circuit breaking and fault injection for resilience testing
+
+8. **Velero Backup Solution**
+   - Automated cluster backups with configurable schedules
+   - Point-in-time disaster recovery capabilities
+   - Scheduled backups to GCS buckets with retention policies
+   - Application-consistent backups with hooks
+   - Selective restore options for granular recovery
+
+9. **ExternalDNS**
+   - Automatic DNS management for services and ingresses
+   - Integrates with Google Cloud DNS
+   - Synchronizes Kubernetes resources with DNS records
+   - Supports multiple DNS providers
+   - Annotated-based configuration for fine-grained control
+
+#### Certificate Management with Let's Encrypt
+
+The platform uses cert-manager with Let's Encrypt for automated certificate management:
+
+1. **Production and Staging Issuers**
+   - `letsencrypt-prod`: For production certificates (rate-limited)
+   - `letsencrypt-staging`: For testing without hitting rate limits
+
+2. **Automatic HTTP-01 Challenge Resolution**
+   - NGINX Ingress Controller automatically handles challenge requests
+   - No manual DNS configuration needed for validation
+
+3. **Certificate Request Process**
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: example-ingress
+     annotations:
+       cert-manager.io/cluster-issuer: "letsencrypt-prod"
+   spec:
+     tls:
+     - hosts:
+       - example.com
+       secretName: example-tls
+     rules:
+     - host: example.com
+       http:
+         paths:
+         - path: /
+           pathType: Prefix
+           backend:
+             service:
+               name: example-service
+               port:
+                 number: 80
+   ```
+
+4. **Certificate Renewal**
+   - Automatic renewal when certificates approach expiration
+   - Certificates are renewed 30 days before expiration
+   - Zero-downtime certificate rotation
+
+#### Add-on Installation Methods
+
+The platform supports multiple methods for installing Kubernetes add-ons:
+
+1. **Interactive Menu-Based Installation**
+   - New enhanced installation script with interactive menu
+   - Choose specific add-ons based on your needs
+   - Install all add-ons at once or select specific categories
+   - Fully automated setup with proper configurations
+   - Run with `./kubernetes-addons/install.sh`
+
+2. **GitOps with ArgoCD/Flux**
+   - Recommended approach for production environments
+   - Add-ons defined as Helm charts or Kustomize manifests in Git
+   - Automated synchronization from Git repository
+   - Full audit trail and version control
+   - Install ArgoCD with `./scripts/install-addons-gitops.sh`
+
+3. **Helm Charts via CI/CD**
+   - Add-ons installed during cluster provisioning
+   - Helm charts applied via GitHub Actions
+   - Version pinning and dependency management
+   - Easy upgrades through CI/CD pipelines
+   - Integrated with infrastructure provisioning
+
+4. **Category-Based Add-ons**
+   - Choose add-ons by category:
+     - **Essential**: NGINX Ingress, cert-manager, Reloader, External Secrets
+     - **Monitoring**: Prometheus Stack with Grafana dashboards
+     - **Security**: Kyverno Policy Management
+     - **Backup**: Velero for backups and recovery
+     - **Service Mesh**: Istio for advanced networking
+     - **DNS Management**: ExternalDNS for automatic DNS configuration
 
 ### Scaling Up
 
@@ -394,6 +546,9 @@ gcloud container clusters get-credentials client-name-gke-cluster \
 
 # Install cluster add-ons
 ./scripts/install-cluster-addons.sh
+
+# For production environments, use GitOps-based installation
+./scripts/install-addons-gitops.sh
 ```
 
 ### 4. Deploy Client Applications
