@@ -1,0 +1,44 @@
+# Ignore CLAUDE.md file used for Claude AI assistant
+CLAUDE.md
+
+# Ignore local configuration files
+.env
+.env.local
+kubeconfig
+*.kubeconfig
+
+# Ignore Terraform state files
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+terraform.tfvars.json
+
+# Ignore local credentials
+**/credentials.json
+**/*key.json
+**/*.pem
+**/*.key
+*-sa-key.json
+github-actions-key.json
+crossplane-sa-key.json
+
+# Ignore system and editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Ignore temporary files
+*.log
+*.tmp
+temp/
+tmp/
+
+# Ignore generated files
+shared-vpc-info.json
+
+# Ignore client-specific configuration that may contain sensitive data
+client-*/
+**/.claude/settings.local.json

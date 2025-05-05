@@ -14,6 +14,7 @@ This platform is designed for B2B SaaS providers who need to deploy and manage i
 - GitOps-based cluster configuration management 
 - Comprehensive Kubernetes add-ons for monitoring, security, and operations
 - Flexible deployment models supporting different isolation requirements
+- Comprehensive GitHub integration for client application management
 
 ## Architecture
 
