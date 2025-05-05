@@ -6,6 +6,26 @@
 project_id = "your-gcp-project-id"
 region = "us-central1"
 
+# APIs to enable for this environment
+# You can customize this list for each client/environment
+apis_to_enable = [
+  "container.googleapis.com",         # GKE API
+  "compute.googleapis.com",           # Compute Engine API
+  "iam.googleapis.com",               # IAM API
+  "serviceusage.googleapis.com",      # Service Usage API
+  "cloudresourcemanager.googleapis.com", # Cloud Resource Manager API
+  "artifactregistry.googleapis.com",  # Artifact Registry API
+  "containerregistry.googleapis.com", # Container Registry API
+  "secretmanager.googleapis.com",     # Secret Manager API
+  "servicenetworking.googleapis.com", # Service Networking API
+  "monitoring.googleapis.com",        # Cloud Monitoring API
+  "logging.googleapis.com",           # Cloud Logging API
+  # Add client-specific APIs as needed
+  # "cloudfunctions.googleapis.com",  # Example additional API for Function-based client
+  # "pubsub.googleapis.com",          # Example additional API for event-driven client
+  # "spanner.googleapis.com",         # Example additional API for high-scale client
+]
+
 # Network - Enhanced Shared VPC Configuration
 shared_vpc_config = {
   # Main network settings

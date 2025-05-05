@@ -65,8 +65,9 @@ locals {
 ## ==========================================================================
 
 module "apis" {
-  source     = "../../modules/apis"
-  project_id = var.project_id
+  source         = "../../modules/apis"
+  project_id     = var.project_id
+  apis_to_enable = var.apis_to_enable
 }
 
 ## ==========================================================================

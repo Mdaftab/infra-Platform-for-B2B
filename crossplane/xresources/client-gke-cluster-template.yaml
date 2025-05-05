@@ -1,0 +1,55 @@
+apiVersion: platform.commercelab.io/v1alpha1
+kind: GKECluster
+metadata:
+  name: CLIENT_NAME-gke-cluster
+  labels:
+    environment: CLIENT_ENV
+    name: CLIENT_NAME-cluster
+    role: application
+    client: CLIENT_NAME
+spec:
+  providerConfigRef:
+    name: default
+  clusterName: CLIENT_NAME-gke-cluster
+  projectID: ${CLIENT_PROJECT_ID}
+  location: us-central1
+  clusterVersion: 1.28
+  releaseChannel: REGULAR
+  maintenanceWindow:
+    startTime: "03:00"
+    recurrence: "FREQ=WEEKLY;BYDAY=SA,SU"
+  
+  # Network configuration - Use shared VPC architecture
+  networkConfig:
+    hostProjectID: ${GCP_HOST_PROJECT_ID}
+    networkName: shared-vpc
+    subnetName: CLIENT_NAME-subnet
+    # Secondary ranges are defined in the shared VPC and referenced by name
+  
+  # Node configuration
+  nodeConfig:
+    nodeCount: 1
+    machineType: e2-standard-2
+    diskSizeGb: 50
+    diskType: pd-standard
+    serviceAccount: shared-gke-node-sa@${CLIENT_PROJECT_ID}.iam.gserviceaccount.com
+    autoscaling:
+      minNodeCount: 1
+      maxNodeCount: 3
+    labels:
+      environment: CLIENT_ENV
+      role: application
+      client: CLIENT_NAME
+    
+  # Security configuration  
+  securityConfig:
+    enableShieldedNodes: true
+    enableIntegrityMonitoring: true
+    enableSecureBoot: true
+    enableNetworkPolicy: true
+    privateClusterConfig:
+      enablePrivateNodes: true
+      enablePrivateEndpoint: false
+      masterIpv4CidrBlock: "172.16.X.16/28" # Replace X with client-specific block
+      masterAuthorizedNetworks:
+        - cidrBlock: "10.0.0.0/20" # Shared VPC subnet CIDR to allow communication from infracluster

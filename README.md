@@ -192,7 +192,7 @@ CM-lab/
 │   │   ├── vpc/                      # Networking & VPC
 │   │   ├── gke/                      # GKE cluster
 │   │   ├── iam/                      # IAM permissions
-│   │   ├── apis/                     # GCP API enablement
+│   │   ├── apis/                     # GCP API enablement (customizable per env)
 │   │   └── container-registry/       # Container Registry
 │   └── environments/
 │       └── dev/                      # Infrastructure configuration
@@ -200,6 +200,10 @@ CM-lab/
 │   ├── bootstrap/                    # Initial setup
 │   ├── compositions/                 # Resource templates
 │   └── xresources/                   # Cluster definitions and claims
+│       ├── dev-gke-cluster-claim.yaml        # Development environment
+│       ├── staging-gke-cluster-claim.yaml    # Staging environment
+│       ├── prod-gke-cluster-claim.yaml       # Production environment
+│       └── client-gke-cluster-template.yaml  # Template for client clusters
 ├── kubernetes-addons/                # Cluster add-ons
 │   ├── cert-manager/                 # TLS certificates
 │   ├── ingress-nginx/                # Ingress controller
@@ -208,6 +212,11 @@ CM-lab/
 ├── workloads/
 │   └── hello-world/                  # Sample application
 └── scripts/                          # Utility scripts
+    ├── setup.sh                      # Platform setup script
+    ├── cleanup.sh                    # Platform cleanup script
+    ├── install-cluster-addons.sh     # Install Kubernetes add-ons
+    ├── add-client-subnet.sh          # Add subnet for new client
+    └── create-client-cluster.sh      # Create client-specific cluster
 ```
 
 ## Architecture Details
@@ -263,6 +272,27 @@ This carefully planned IP address allocation ensures no conflicts between enviro
 
 ## Advanced Features
 
+### Multi-Client B2B Deployment
+
+The platform provides flexible B2B capabilities for deploying dedicated client environments:
+
+1. **Client Onboarding Process**:
+   - Use `scripts/add-client-subnet.sh` to add a dedicated subnet for the client
+   - Use `scripts/create-client-cluster.sh` to provision a client-specific GKE cluster
+   - Each client gets isolated infrastructure with shared management
+
+2. **Client-Specific Customization**:
+   - API enablement can be customized for each client/environment
+   - Infrastructure sizing adjusts based on client requirements
+   - Security policies can be tailored to client compliance needs
+
+3. **Resource Isolation**:
+   - Each client has dedicated subnet in the shared VPC
+   - Workloads run in separate GKE clusters with network isolation
+   - Firewall rules can be customized for each client
+
+This architecture allows service providers to easily onboard new clients with complete infrastructure isolation while maintaining centralized management.
+
 ### Database Integration
 
 The platform includes a reserved subnet for future database deployments. This enables:
@@ -298,11 +328,85 @@ All application clusters include these pre-configured add-ons:
 
 To add additional clusters to an environment:
 
-1. Create a new Crossplane claim file (copy an existing one)
-2. Update the cluster name and other parameters as needed
-3. Apply the claim using kubectl or the CI/CD pipeline
+1. **For standard environments (dev/staging/prod)**:
+   - Create a new Crossplane claim file (copy an existing one)
+   - Update the cluster name and other parameters as needed
+   - Apply the claim using kubectl or the CI/CD pipeline
+
+2. **For client-specific environments**:
+   - Use the provided scripts for easy client onboarding:
+     ```bash
+     # Add a dedicated subnet for the client
+     ./scripts/add-client-subnet.sh
+     
+     # Provision a client-specific GKE cluster
+     ./scripts/create-client-cluster.sh
+     ```
 
 The architecture supports unlimited clusters without any networking constraints.
+
+## B2B Client Onboarding
+
+The platform is designed to easily onboard new B2B clients with dedicated infrastructure. Here's how to set up a new client:
+
+### 1. Add Client Subnet to Shared VPC
+
+First, run the add-client-subnet script to create a dedicated subnet for the client:
+
+```bash
+./scripts/add-client-subnet.sh
+```
+
+This script will:
+- Create a new subnet in the shared VPC with dedicated IP ranges
+- Add the necessary IAM bindings for the client project
+- Update the Terraform configuration
+
+After running the script, apply the Terraform changes:
+
+```bash
+cd infra/environments/dev
+terraform plan
+terraform apply
+```
+
+### 2. Provision Client-Specific GKE Cluster
+
+Once the subnet is ready, create a dedicated GKE cluster for the client:
+
+```bash
+./scripts/create-client-cluster.sh
+```
+
+This script will:
+- Generate a custom Crossplane claim for the client
+- Apply the claim to provision a new GKE cluster
+- Configure the cluster with client-specific settings
+
+### 3. Configure Client Cluster
+
+After the cluster is provisioned, install the necessary add-ons:
+
+```bash
+# Connect to the client cluster
+gcloud container clusters get-credentials client-name-gke-cluster \
+  --project=client-project-id --region=us-central1
+
+# Install cluster add-ons
+./scripts/install-cluster-addons.sh
+```
+
+### 4. Deploy Client Applications
+
+Finally, deploy the client's applications to their dedicated cluster:
+
+```bash
+# Deploy client application using Helm
+helm upgrade --install client-app ./workloads/hello-world \
+  --namespace default \
+  --set environment=production \
+  --set client=client-name
+```
 
 ## Troubleshooting
 
@@ -314,6 +418,7 @@ The architecture supports unlimited clusters without any networking constraints.
 | **VPC setup issues** | Verify service project attachment with `gcloud compute shared-vpc get-host-project SERVICE_PROJECT_ID` |
 | **Cluster creation fails** | Check Crossplane logs with `kubectl logs -l app=crossplane -n crossplane-system` |
 | **Network connectivity** | Verify subnet IAM bindings with `gcloud projects get-iam-policy HOST_PROJECT_ID --format=json \| grep compute.subnetworks.use` |
+| **Client cluster issues** | Check client subnet configuration in terraform.tfvars and ensure client project has proper IAM permissions |
 
 ### Validating Your Deployment
 
@@ -326,14 +431,14 @@ gcloud container clusters list --project=your-host-project-id
 # Verify Crossplane installation
 kubectl --context=infracluster get providers
 
-# List application clusters created by Crossplane
+# List all clusters created by Crossplane (including client clusters)
 kubectl --context=infracluster get gkecluster.platform.commercelab.io
 
-# Connect to dev cluster
-gcloud container clusters get-credentials dev-gke-cluster \
-  --project=your-dev-project-id --region=us-central1
+# Connect to a client cluster
+gcloud container clusters get-credentials client-name-gke-cluster \
+  --project=client-project-id --region=us-central1
 
-# Check deployed application
+# Check deployed applications
 kubectl get pods -n default
 ```
 
