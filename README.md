@@ -204,34 +204,30 @@ Follow these steps to deploy the platform:
 - `helm` CLI installed
 - GitHub account for CI/CD pipelines
 
-### Step 1: Set Up Google Cloud Projects
+### Step 1: Set Up Infrastructure Project
 
-1. Create the infrastructure and environment projects:
+1. Create your infrastructure project in Google Cloud:
 
 ```bash
 # Create Infrastructure Project
 gcloud projects create your-infra-project-id --name="Infrastructure"
-
-# Create Internal Environment Projects (optional)
-gcloud projects create your-dev-project-id --name="Development"
-gcloud projects create your-staging-project-id --name="Staging"
-gcloud projects create your-prod-project-id --name="Production"
 ```
 
 2. Run the setup script to initialize the infrastructure:
 
 ```bash
-./scripts/setup.sh --project your-infra-project-id
+./scripts/setup.sh
 ```
+
+The script will prompt you for your project ID and set up all necessary resources.
 
 ### Step 2: Update Configuration Values
 
 Edit the following files with your specific project information:
 
 1. **Terraform Variables** (`infra/environments/dev/terraform.tfvars`):
-   - Replace `your-infra-project-id` with your infrastructure project ID
-   - Replace `your-dev-project-id`, `your-staging-project-id`, and `your-prod-project-id` with your environment project IDs
-   - Update service account values as needed
+   - Replace the project ID with your infrastructure project ID
+   - Update any other configuration values specific to your environment
 
 2. **Terraform Backend** (`infra/environments/dev/backend.tf`):
    - Replace `your-terraform-state-bucket` with your GCS bucket name
@@ -249,12 +245,9 @@ Edit the following files with your specific project information:
 
 Add these secrets to your GitHub repository:
 
-- `GCP_INFRA_PROJECT_ID`: Your infrastructure project ID
+- `GCP_PROJECT_ID`: Your infrastructure project ID
 - `GCP_SA_KEY`: Base64-encoded service account key (output from setup script)
 - `GCP_TERRAFORM_STATE_BUCKET`: GCS bucket name for Terraform state
-- `GCP_DEV_PROJECT_ID`: Your development project ID (if using internal environments)
-- `GCP_STAGING_PROJECT_ID`: Your staging project ID (if using internal environments)
-- `GCP_PROD_PROJECT_ID`: Your production project ID (if using internal environments)
 
 ### Step 4: Deploy Infrastructure
 
@@ -717,7 +710,7 @@ After completing all the steps, validate that everything is working:
 
 ```bash
 # Check infracluster is running
-gcloud container clusters list --project=your-host-project-id
+gcloud container clusters list --project=your-infra-project-id
 
 # Verify Crossplane installation
 kubectl --context=infracluster get providers
@@ -738,15 +731,10 @@ kubectl get pods -n default
 To remove all resources when you're done:
 
 ```bash
-./scripts/cleanup.sh --project your-infra-project-id
+./scripts/cleanup.sh
 ```
 
-For client projects, you can delete them individually:
-
-```bash
-# Delete client resources and project
-./scripts/cleanup-client.sh --project client-project-id
-```
+The script will prompt you for your project ID and handle the cleanup process.
 
 ## Contributing
 
