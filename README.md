@@ -18,15 +18,13 @@ This platform is designed for B2B SaaS providers who need to deploy and manage i
 
 ## Architecture
 
-The platform supports two architectural patterns for multi-client management:
-
-### Dedicated Architecture (Recommended for B2B)
+The platform uses a dedicated architecture pattern for complete client isolation:
 
 ```mermaid
 %%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 40, 'padding': 10 }}}%%
 graph TB
     subgraph IP[Infrastructure Project]
-        IS[Infra Subnet]
+        IS[Infrastructure VPC]
         IC[Infra Cluster<br>Crossplane]
         
         IS --> IC
@@ -59,9 +57,9 @@ graph TB
         CC1 -.-> CC3
     end
     
-    IC --> CA2
-    IC --> CB2
-    IC --> CC2
+    IC -->|Manages| CA2
+    IC -->|Manages| CB2
+    IC -->|Manages| CC2
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef infra fill:#e1f5fe,stroke:#333,stroke-width:1px;
@@ -69,59 +67,6 @@ graph TB
     
     class IP infra;
     class CP1,CP2,CP3,CA1,CA2,CA3,CB1,CB2,CB3,CC1,CC2,CC3 client;
-```
-
-### Shared VPC Architecture (Alternative)
-
-```mermaid
-%%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 40, 'padding': 10 }}}%%
-graph TB
-    subgraph HP[Host Project]
-        subgraph VPC[Shared VPC Network]
-            direction TB
-            IS[Infra Subnet]
-            DS[Dev Subnet]
-            SS[Staging Subnet]
-            PS[Prod Subnet]
-            CS1[Client A Subnet]
-            CS2[Client B Subnet]
-            DBS[DB Subnet]
-            IC[Infra Cluster<br>Crossplane]
-            
-            IS --> IC
-        end
-    end
-    
-    subgraph SP[Service Projects]
-        direction TB
-        DP[Dev Project] --> DC[Dev GKE]
-        StP[Staging Project] --> SC[Staging GKE]
-        PP[Prod Project] --> PC[Prod GKE]
-        CP1[Client A Project] --> CC1[Client A GKE]
-        CP2[Client B Project] --> CC2[Client B GKE]
-    end
-    
-    IC --> DC
-    IC --> SC
-    IC --> PC
-    IC --> CC1
-    IC --> CC2
-    
-    DS -.-> DC
-    SS -.-> SC
-    PS -.-> PC
-    CS1 -.-> CC1
-    CS2 -.-> CC2
-    
-    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
-    classDef vpc fill:#e1f5fe,stroke:#333,stroke-width:1px;
-    classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
-    classDef client fill:#fff0f5,stroke:#333,stroke-width:1px;
-    
-    class HP,SP default;
-    class VPC vpc;
-    class IC,DC,SC,PC cluster;
-    class CS1,CS2,CP1,CP2,CC1,CC2 client;
 ```
 
 ### How It Works
@@ -391,10 +336,10 @@ Each environment has its own dedicated GKE cluster:
 
 ### 3. Networking
 
-The shared VPC is configured with these subnets:
+The infrastructure cluster VPC has the following configuration, and each client gets a similar dedicated network:
 
 ```
-Shared VPC Network (10.0.0.0/8)
+Infrastructure VPC Network (10.0.0.0/8)
 │
 ├── 10.0.0.0/20    - Infra Subnet      - For Infracluster
 │   ├── 10.16.0.0/16  - Pod CIDR         - For Infracluster Pods
@@ -426,9 +371,9 @@ This carefully planned IP address allocation ensures no conflicts between enviro
 The platform provides flexible B2B capabilities for deploying dedicated client environments:
 
 1. **Client Onboarding Process**:
-   - Use `scripts/add-client-subnet.sh` to add a dedicated subnet for the client
-   - Use `scripts/create-client-cluster.sh` to provision a client-specific GKE cluster
-   - Each client gets isolated infrastructure with shared management
+   - Use `scripts/onboard-client.sh` for automatic client setup
+   - Use `scripts/create-client-cluster-dedicated.sh` to provision a client-specific GKE cluster
+   - Each client gets completely isolated infrastructure
 
 2. **Client-Specific Customization**:
    - API enablement can be customized for each client/environment
@@ -436,9 +381,9 @@ The platform provides flexible B2B capabilities for deploying dedicated client e
    - Security policies can be tailored to client compliance needs
 
 3. **Resource Isolation**:
-   - Each client has dedicated subnet in the shared VPC
-   - Workloads run in separate GKE clusters with network isolation
-   - Firewall rules can be customized for each client
+   - Each client has a dedicated VPC in their own project
+   - Complete isolation at the network, compute, and storage layers
+   - Firewall rules and IAM policies dedicated to each client
 
 This architecture allows service providers to easily onboard new clients with complete infrastructure isolation while maintaining centralized management.
 
@@ -608,18 +553,18 @@ To add additional clusters to an environment:
 2. **For client-specific environments**:
    - Use the provided scripts for easy client onboarding:
      ```bash
-     # Add a dedicated subnet for the client
-     ./scripts/add-client-subnet.sh
+     # For complete automated client onboarding
+     ./scripts/onboard-client.sh
      
-     # Provision a client-specific GKE cluster
-     ./scripts/create-client-cluster.sh
+     # Or use the dedicated VPC cluster creation script directly
+     ./scripts/create-client-cluster-dedicated.sh
      ```
 
 The architecture supports unlimited clusters without any networking constraints.
 
 ## B2B Client Onboarding
 
-The platform supports two approaches for B2B client onboarding, with the recommended approach being dedicated projects with isolated VPCs for maximum tenant separation.
+The platform uses dedicated projects with isolated VPCs for complete tenant separation, providing maximum security and isolation for each client.
 
 ### One-Command Client Onboarding
 
@@ -641,9 +586,9 @@ This script automates the entire process, including:
 
 The script will prompt you for all necessary information and execute each step in sequence.
 
-### Approach 1: Dedicated Project with Isolated VPC & GitHub Integration (Recommended)
+### Step-by-Step Client Onboarding
 
-This approach provisions a completely isolated environment for each client, with dedicated GCP project, VPC, GKE cluster, and database. It also creates a GitHub project and repository for client application deployment.
+If you prefer to understand each step of the process, you can follow this step-by-step guide:
 
 #### 1. Set Up Client GCP Project
 
@@ -713,8 +658,11 @@ gcloud container clusters get-credentials CLIENT_NAME-gke-cluster \
 
 # Install cluster add-ons
 ./kubernetes-addons/install.sh
+```
 
-# For production environments, use GitOps-based installation
+For production environments, use GitOps-based installation:
+
+```bash
 ./scripts/install-addons-gitops.sh
 ```
 
@@ -742,34 +690,6 @@ The client's applications will be automatically deployed from GitHub to their de
    - Deploy it to the client's GKE cluster
    - Verify the deployment
 
-### Approach 2: Shared VPC Architecture (Alternative)
-
-For use cases where shared VPC is preferred, you can use the original approach:
-
-```bash
-# Add client subnet to shared VPC
-./scripts/add-client-subnet.sh
-
-# Apply Terraform changes to create the subnet
-cd infra/environments/dev
-terraform plan
-terraform apply
-
-# Provision client GKE cluster using shared VPC
-./scripts/create-client-cluster.sh
-```
-
-### Client Deployment Comparison
-
-| Aspect | Dedicated VPC Approach | Shared VPC Approach |
-|--------|------------------------|---------------------|
-| **Tenant Isolation** | Complete isolation at GCP project level | Subnet-level isolation within shared VPC |
-| **Security** | Stronger security boundaries | Requires careful IAM configuration |
-| **Scalability** | Unlimited scaling per client | Limited by shared VPC quota limits |
-| **Complexity** | Simpler per-client management | More complex VPC configuration |
-| **Cost** | Potentially higher networking costs | More efficient network resource usage |
-| **Database** | Dedicated Cloud SQL instance | Shared or dedicated options |
-
 ## Troubleshooting
 
 ### Common Infrastructure Issues
@@ -779,19 +699,19 @@ terraform apply
 | **Terraform errors** | Check that your GCP service account has the required permissions and that all placeholders in terraform.tfvars are replaced |
 | **VPC creation fails** | Verify APIs are enabled with `gcloud services list --project=CLIENT_PROJECT_ID` |
 | **Cluster creation fails** | Check Crossplane logs with `kubectl logs -l app=crossplane -n crossplane-system` |
-| **Network connectivity** | For dedicated VPC: `gcloud compute networks describe CLIENT_NAME-network --project=CLIENT_PROJECT_ID` |
+| **Network connectivity** | Check VPC configuration: `gcloud compute networks describe CLIENT_NAME-network --project=CLIENT_PROJECT_ID` |
 | **Client IAM issues** | Ensure node service account has proper permissions with `gcloud iam service-accounts get-iam-policy gke-node-sa@CLIENT_PROJECT_ID.iam.gserviceaccount.com` |
 | **Database connectivity** | Check VPC peering between GKE and Cloud SQL with `gcloud compute networks peerings list --network=CLIENT_NAME-network --project=CLIENT_PROJECT_ID` |
 
-### Troubleshooting Dedicated vs. Shared VPC Issues
+### Troubleshooting Client-Specific Issues
 
-| Dedicated VPC Architecture | Shared VPC Architecture |
-|---------------------------|--------------------------|
-| GCP project quota limits | Service project attachment issues |
-| IAM permissions within client project | Subnet IAM bindings between projects |
-| Cloud NAT configuration for egress | Cross-project networking policies |
-| Private GKE cluster creation | VPC sharing permissions |
-| Database VPC peering | Database subnet access |
+| Component | Potential Issues | Solution |
+|-----------|------------------|----------|
+| GCP Project | Quota limits | Request quota increases in Google Cloud Console |
+| IAM | Missing permissions | Verify service account roles with `gcloud iam service-accounts get-iam-policy` |
+| Networking | Cloud NAT issues | Check NAT configuration with `gcloud compute routers nats describe` |
+| GKE | Cluster creation failures | Verify API enablement and check Crossplane logs |
+| Database | Connectivity problems | Check private service access in the client's VPC |
 
 ### Validating Your Deployment
 
