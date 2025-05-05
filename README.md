@@ -1,19 +1,76 @@
-# Multi-Cluster Kubernetes Management Platform
+# Multi-Cluster Kubernetes Management Platform for B2B
 
-> A modern Kubernetes infrastructure management solution for deploying and managing multiple GKE clusters across environments using Terraform, Crossplane, and GitHub Actions.
+> A comprehensive B2B-ready Kubernetes management platform for deploying and managing multiple isolated GKE environments at scale using Terraform, Crossplane, and GitOps practices.
 
 ## Project Overview
 
-This platform allows you to create a central infrastructure cluster that can provision and manage multiple application clusters across development, staging, and production environments. It uses a shared VPC architecture to provide secure networking with isolated subnets for each environment.
+This platform is designed for B2B SaaS providers who need to deploy and manage isolated Kubernetes environments for multiple clients. It features a central infrastructure cluster that can provision and manage client-specific resources with complete tenant isolation.
 
 **Key Features:**
-- Infrastructure-as-Code using Terraform
-- Dynamic cluster provisioning using Crossplane
-- CI/CD pipelines with GitHub Actions
-- Secure networking with shared VPC
-- Future database support built-in
+- Complete client isolation with dedicated GCP projects and VPCs
+- Infrastructure-as-Code using Terraform and Crossplane
+- Automated client onboarding with a single command
+- Dedicated Cloud SQL database per client (optional)
+- GitOps-based cluster configuration management 
+- Comprehensive Kubernetes add-ons for monitoring, security, and operations
+- Flexible deployment models supporting different isolation requirements
 
 ## Architecture
+
+The platform supports two architectural patterns for multi-client management:
+
+### Dedicated Architecture (Recommended for B2B)
+
+```mermaid
+%%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 40, 'padding': 10 }}}%%
+graph TB
+    subgraph IP[Infrastructure Project]
+        IS[Infra Subnet]
+        IC[Infra Cluster<br>Crossplane]
+        
+        IS --> IC
+    end
+    
+    subgraph CP1[Client A Project]
+        CA1[Client A VPC]
+        CA2[Client A GKE]
+        CA3[Client A DB]
+        
+        CA1 -.-> CA2
+        CA1 -.-> CA3
+    end
+    
+    subgraph CP2[Client B Project]
+        CB1[Client B VPC]
+        CB2[Client B GKE]
+        CB3[Client B DB]
+        
+        CB1 -.-> CB2
+        CB1 -.-> CB3
+    end
+    
+    subgraph CP3[Client C Project]
+        CC1[Client C VPC]
+        CC2[Client C GKE]
+        CC3[Client C DB]
+        
+        CC1 -.-> CC2
+        CC1 -.-> CC3
+    end
+    
+    IC --> CA2
+    IC --> CB2
+    IC --> CC2
+    
+    classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
+    classDef infra fill:#e1f5fe,stroke:#333,stroke-width:1px;
+    classDef client fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    
+    class IP infra;
+    class CP1,CP2,CP3,CA1,CA2,CA3,CB1,CB2,CB3,CC1,CC2,CC3 client;
+```
+
+### Shared VPC Architecture (Alternative)
 
 ```mermaid
 %%{init: {'theme': 'neutral', 'flowchart': { 'curve': 'basis', 'nodeSpacing': 40, 'rankSpacing': 40, 'padding': 10 }}}%%
@@ -73,58 +130,74 @@ graph TB
 flowchart TD
     A[GitHub Actions] -->|Deploy| B[Terraform Code]
     B -->|Provision| C[Infra Cluster<br>Crossplane]
-    C -->|Manage| D[App Clusters<br>Dev/Staging/Prod]
-    C -->|Manage| E[Client Clusters<br>Client A/B/C]
     
-    F[Scripts] -->|Add Client| G[Terraform Updates]
-    F -->|Create Cluster| H[Crossplane Claims]
-    G -->|Update| B
-    H -->|Apply to| C
+    C -->|Manage| D[Internal Clusters<br>Dev/Staging/Prod]
+    C -->|Manage| E[Client Clusters<br>with Dedicated VPCs]
+    
+    F[Client Onboarding<br>Script] -->|Create Cluster Claim| G[Client GKE Cluster]
+    F -->|Create Database Claim| H[Client Cloud SQL]
+    
+    G -->|Deploy| I[Client Workloads]
+    H -->|Connect to| I
     
     classDef default fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef action fill:#e1f5fe,stroke:#333,stroke-width:1px;
-    classDef cluster fill:#e8f5e9,stroke:#333,stroke-width:1px;
+    classDef infra fill:#e8f5e9,stroke:#333,stroke-width:1px;
     classDef client fill:#fff0f5,stroke:#333,stroke-width:1px;
     
-    class A action;
-    class B,C,D cluster;
-    class E,F,G,H client;
+    class A,F action;
+    class B,C,D infra;
+    class E,G,H,I client;
 ```
 
 ### Components:
 
-1. **Host Project (With Shared VPC)**
-   - Contains the Shared VPC with separate subnets for:
-     - Infrastructure (10.0.0.0/20)
-     - Development (10.20.0.0/20)
-     - Staging (10.40.0.0/20)
-     - Production (10.60.0.0/20)
-     - Client-specific subnets (10.X.0.0/20) - Dynamically allocated
-     - Database (10.80.0.0/20)
+#### Infrastructure Components:
+
+1. **Infrastructure Project**
+   - Contains the infrastructure management cluster
+   - Centralized control plane for all client resources
+   - Houses Crossplane for dynamic resource provisioning
+   - Isolated from client workloads for better security
 
 2. **Infrastructure Cluster**
-   - Located in the Host Project
-   - Runs Crossplane for managing application clusters
-   - Provides centralized management for both internal and client clusters
-   - Handles cluster lifecycle for all environments
+   - GKE cluster running Crossplane
+   - Provides centralized management for client environments
+   - Controls the lifecycle of all client resources
+   - Maintains clear separation between clients
 
-3. **Service Projects**
-   - Dev, Staging, and Production projects (internal environments)
-   - Client-specific projects (B2B environments)
-   - Each has its own application cluster
-   - All use subnets from the shared VPC with proper IAM bindings
+#### Client Components (Per Client):
 
-4. **Application Clusters**
-   - Located in their respective service projects
-   - Run application workloads in isolated environments
-   - Managed by Crossplane from the infrastructure cluster
+1. **Client Project**
+   - Dedicated GCP project for each client
+   - Complete tenant isolation using GCP's security boundaries
+   - Independent billing and quota management
+   - Client-specific resource policies and IAM controls
 
-5. **Client Clusters**
-   - Dedicated GKE clusters for B2B clients
-   - Complete isolation between clients
-   - Custom API enablement per client
-   - Flexible resource allocation based on client needs
-   - Created using automated scripts for consistency
+2. **Dedicated VPC Network**
+   - Private VPC per client
+   - Custom IP address ranges (10.0.0.0/20 for cluster subnet)
+   - Secondary IP ranges for pods (10.16.0.0/16) and services (10.17.0.0/20)
+   - Cloud NAT for egress traffic
+   - Client-specific firewall rules
+
+3. **Kubernetes Cluster**
+   - GKE cluster with private nodes
+   - Autoscaling based on client workload demands
+   - Workload Identity for secure GCP service access
+   - Client-specific node configurations
+
+4. **Database (Optional)**
+   - Dedicated Cloud SQL instance per client
+   - Private connectivity to the client's VPC
+   - Automated backups and high availability options
+   - Independent scaling without affecting other clients
+
+5. **Management**
+   - All client resources provisioned and managed by Crossplane
+   - Automated client onboarding through CLI scripts
+   - Centralized monitoring with client-specific dashboards
+   - Role-based access control for client administrators
 
 ## Getting Started
 
@@ -499,69 +572,108 @@ The architecture supports unlimited clusters without any networking constraints.
 
 ## B2B Client Onboarding
 
-The platform is designed to easily onboard new B2B clients with dedicated infrastructure. Here's how to set up a new client:
+The platform supports two approaches for B2B client onboarding, with the recommended approach being dedicated projects with isolated VPCs for maximum tenant separation.
 
-### 1. Add Client Subnet to Shared VPC
+### Approach 1: Dedicated Project with Isolated VPC (Recommended)
 
-First, run the add-client-subnet script to create a dedicated subnet for the client:
+This approach provisions a completely isolated environment for each client, with dedicated GCP project, VPC, GKE cluster, and database.
+
+#### 1. Set Up Client GCP Project
+
+First, create a dedicated GCP project for the client:
 
 ```bash
-./scripts/add-client-subnet.sh
+# Create new client project
+gcloud projects create CLIENT_PROJECT_ID --name="Client Name"
+
+# Enable required APIs
+gcloud services enable container.googleapis.com compute.googleapis.com \
+  cloudresourcemanager.googleapis.com iam.googleapis.com \
+  --project=CLIENT_PROJECT_ID
+
+# Create service account for GKE nodes
+gcloud iam service-accounts create gke-node-sa \
+  --project=CLIENT_PROJECT_ID \
+  --display-name="GKE Node Service Account"
+
+# Grant required permissions
+gcloud projects add-iam-policy-binding CLIENT_PROJECT_ID \
+  --member="serviceAccount:gke-node-sa@CLIENT_PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/container.nodeServiceAccount"
+```
+
+#### 2. Provision Client-Specific GKE Cluster with Dedicated VPC
+
+Use the dedicated client provisioning script:
+
+```bash
+./scripts/create-client-cluster-dedicated.sh
 ```
 
 This script will:
-- Create a new subnet in the shared VPC with dedicated IP ranges
-- Add the necessary IAM bindings for the client project
-- Update the Terraform configuration
+- Create a dedicated VPC in the client's project
+- Provision a subnet with necessary secondary IP ranges
+- Create a Cloud NAT gateway for external connectivity
+- Configure firewall rules for the client's network
+- Generate a Crossplane claim for the GKE cluster
+- Optionally set up a dedicated Cloud SQL database
+- Apply the claim to Crossplane for provisioning
 
-After running the script, apply the Terraform changes:
-
-```bash
-cd infra/environments/dev
-terraform plan
-terraform apply
-```
-
-### 2. Provision Client-Specific GKE Cluster
-
-Once the subnet is ready, create a dedicated GKE cluster for the client:
-
-```bash
-./scripts/create-client-cluster.sh
-```
-
-This script will:
-- Generate a custom Crossplane claim for the client
-- Apply the claim to provision a new GKE cluster
-- Configure the cluster with client-specific settings
-
-### 3. Configure Client Cluster
+#### 3. Configure Client Cluster
 
 After the cluster is provisioned, install the necessary add-ons:
 
 ```bash
 # Connect to the client cluster
-gcloud container clusters get-credentials client-name-gke-cluster \
-  --project=client-project-id --region=us-central1
+gcloud container clusters get-credentials CLIENT_NAME-gke-cluster \
+  --project=CLIENT_PROJECT_ID --region=us-central1
 
 # Install cluster add-ons
-./scripts/install-cluster-addons.sh
+./kubernetes-addons/install.sh
 
 # For production environments, use GitOps-based installation
 ./scripts/install-addons-gitops.sh
 ```
 
-### 4. Deploy Client Applications
+#### 4. Deploy Client Applications
 
 Finally, deploy the client's applications to their dedicated cluster:
 
 ```bash
 # Deploy client application using Helm
-helm upgrade --install client-app ./workloads/hello-world \
+helm upgrade --install CLIENT_NAME-app ./workloads/hello-world \
   --namespace default \
   --set environment=production \
-  --set client=client-name
+  --set client=CLIENT_NAME
 ```
+
+### Approach 2: Shared VPC Architecture (Alternative)
+
+For use cases where shared VPC is preferred, you can use the original approach:
+
+```bash
+# Add client subnet to shared VPC
+./scripts/add-client-subnet.sh
+
+# Apply Terraform changes to create the subnet
+cd infra/environments/dev
+terraform plan
+terraform apply
+
+# Provision client GKE cluster using shared VPC
+./scripts/create-client-cluster.sh
+```
+
+### Client Deployment Comparison
+
+| Aspect | Dedicated VPC Approach | Shared VPC Approach |
+|--------|------------------------|---------------------|
+| **Tenant Isolation** | Complete isolation at GCP project level | Subnet-level isolation within shared VPC |
+| **Security** | Stronger security boundaries | Requires careful IAM configuration |
+| **Scalability** | Unlimited scaling per client | Limited by shared VPC quota limits |
+| **Complexity** | Simpler per-client management | More complex VPC configuration |
+| **Cost** | Potentially higher networking costs | More efficient network resource usage |
+| **Database** | Dedicated Cloud SQL instance | Shared or dedicated options |
 
 ## Troubleshooting
 
@@ -570,10 +682,21 @@ helm upgrade --install client-app ./workloads/hello-world \
 | Problem | Solution |
 |---------|----------|
 | **Terraform errors** | Check that your GCP service account has the required permissions and that all placeholders in terraform.tfvars are replaced |
-| **VPC setup issues** | Verify service project attachment with `gcloud compute shared-vpc get-host-project SERVICE_PROJECT_ID` |
+| **VPC creation fails** | Verify APIs are enabled with `gcloud services list --project=CLIENT_PROJECT_ID` |
 | **Cluster creation fails** | Check Crossplane logs with `kubectl logs -l app=crossplane -n crossplane-system` |
-| **Network connectivity** | Verify subnet IAM bindings with `gcloud projects get-iam-policy HOST_PROJECT_ID --format=json \| grep compute.subnetworks.use` |
-| **Client cluster issues** | Check client subnet configuration in terraform.tfvars and ensure client project has proper IAM permissions |
+| **Network connectivity** | For dedicated VPC: `gcloud compute networks describe CLIENT_NAME-network --project=CLIENT_PROJECT_ID` |
+| **Client IAM issues** | Ensure node service account has proper permissions with `gcloud iam service-accounts get-iam-policy gke-node-sa@CLIENT_PROJECT_ID.iam.gserviceaccount.com` |
+| **Database connectivity** | Check VPC peering between GKE and Cloud SQL with `gcloud compute networks peerings list --network=CLIENT_NAME-network --project=CLIENT_PROJECT_ID` |
+
+### Troubleshooting Dedicated vs. Shared VPC Issues
+
+| Dedicated VPC Architecture | Shared VPC Architecture |
+|---------------------------|--------------------------|
+| GCP project quota limits | Service project attachment issues |
+| IAM permissions within client project | Subnet IAM bindings between projects |
+| Cloud NAT configuration for egress | Cross-project networking policies |
+| Private GKE cluster creation | VPC sharing permissions |
+| Database VPC peering | Database subnet access |
 
 ### Validating Your Deployment
 

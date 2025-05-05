@@ -1,0 +1,409 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: xgkeclusters-dedicated.platform.commercelab.io
+  labels:
+    provider: gcp
+    service: gke
+    type: dedicated-cluster
+spec:
+  compositeTypeRef:
+    apiVersion: platform.commercelab.io/v1alpha1
+    kind: XGKECluster
+  patchSets:
+    - name: common-parameters
+      patches:
+        - fromFieldPath: spec.clusterVersion
+          toFieldPath: spec.forProvider.initialClusterVersion
+        - fromFieldPath: spec.nodeConfig.machineType
+          toFieldPath: spec.forProvider.nodeConfig[0].machineType
+        - fromFieldPath: spec.nodeConfig.diskSizeGb
+          toFieldPath: spec.forProvider.nodeConfig[0].diskSizeGb
+        - fromFieldPath: spec.nodeConfig.diskType
+          toFieldPath: spec.forProvider.nodeConfig[0].diskType
+    - name: metadata-patch
+      patches:
+        - fromFieldPath: metadata.labels
+          toFieldPath: metadata.labels
+        - fromFieldPath: metadata.annotations
+          toFieldPath: metadata.annotations
+    - name: security-config
+      patches:
+        - fromFieldPath: spec.securityConfig.enableShieldedNodes
+          toFieldPath: spec.forProvider.enableShieldedNodes
+          policy:
+            fromFieldPath: Optional
+        - fromFieldPath: spec.securityConfig.enableNetworkPolicy
+          toFieldPath: spec.forProvider.networkPolicy[0].enabled
+          policy:
+            fromFieldPath: Optional
+        - fromFieldPath: spec.securityConfig.enableBinaryAuthorization
+          toFieldPath: spec.forProvider.binaryAuthorization[0].evaluationMode
+          transforms:
+            - type: map
+              map:
+                "true": "PROJECT_SINGLETON_POLICY_ENFORCE"
+                "false": "DISABLED"
+          policy:
+            fromFieldPath: Optional
+
+  resources:
+    # First create the VPC Network
+    - name: vpc-network
+      base:
+        apiVersion: compute.gcp.upbound.io/v1beta1
+        kind: Network
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-network"
+          labels:
+            crossplane.io/composition: gke-network
+        spec:
+          forProvider:
+            autoCreateSubnetworks: false
+            routingMode: REGIONAL
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.project
+
+    # Create the subnet for the cluster
+    - name: vpc-subnet
+      base:
+        apiVersion: compute.gcp.upbound.io/v1beta1
+        kind: Subnetwork
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-subnet"
+          labels:
+            crossplane.io/composition: gke-subnet
+        spec:
+          forProvider:
+            ipCidrRange: "10.0.0.0/20"
+            region: "$(spec.location)"
+            network: "projects/$(spec.projectID)/global/networks/$(spec.clusterName)-network"
+            privateIpGoogleAccess: true
+            secondaryIpRanges:
+              - rangeName: "$(spec.clusterName)-pods"
+                ipCidrRange: "10.16.0.0/16"
+              - rangeName: "$(spec.clusterName)-services"
+                ipCidrRange: "10.17.0.0/20"
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.project
+        # Dependence on the VPC network
+        - fromFieldPath: spec.clusterName
+          toFieldPath: spec.providerConfigRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "network-$(spec.clusterName)"
+            
+    # Cloud NAT router for egress traffic
+    - name: cloud-router
+      base:
+        apiVersion: compute.gcp.upbound.io/v1beta1
+        kind: Router
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-router"
+          labels:
+            crossplane.io/composition: gke-router
+        spec:
+          forProvider:
+            region: "$(spec.location)"
+            network: "projects/$(spec.projectID)/global/networks/$(spec.clusterName)-network"
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.project
+
+    # Cloud NAT for egress traffic
+    - name: cloud-nat
+      base:
+        apiVersion: compute.gcp.upbound.io/v1beta1
+        kind: RouterNAT
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-nat"
+          labels:
+            crossplane.io/composition: gke-nat
+        spec:
+          forProvider:
+            router: "$(spec.clusterName)-router"
+            region: "$(spec.location)"
+            natIpAllocateOption: AUTO_ONLY
+            sourceSubnetworkIpRangesToNat: ALL_SUBNETWORKS_ALL_IP_RANGES
+            logConfig:
+              enable: true
+              filter: ALL
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.project
+
+    # Firewall rule to allow intra-cluster communication
+    - name: firewall-internal
+      base:
+        apiVersion: compute.gcp.upbound.io/v1beta1
+        kind: Firewall
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-allow-internal"
+          labels:
+            crossplane.io/composition: gke-firewall
+        spec:
+          forProvider:
+            network: "projects/$(spec.projectID)/global/networks/$(spec.clusterName)-network"
+            sourceRanges:
+              - "10.0.0.0/8"
+            allowed:
+              - protocol: "all"
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.project
+
+    # The GKE Cluster itself
+    - name: gke-cluster
+      base:
+        apiVersion: container.gcp.upbound.io/v1beta1
+        kind: Cluster
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)"
+          labels:
+            crossplane.io/composition: gke-cluster
+        spec:
+          forProvider:
+            location: us-central1
+            initialNodeCount: 1
+            loggingService: logging.googleapis.com/kubernetes
+            monitoringService: monitoring.googleapis.com/kubernetes
+            networkingMode: VPC_NATIVE
+            removeDefaultNodePool: true
+            # IP allocation policy for GKE with dedicated VPC
+            ipAllocationPolicy:
+              - clusterSecondaryRangeName: "$(spec.clusterName)-pods"
+                servicesSecondaryRangeName: "$(spec.clusterName)-services"
+            # Private cluster config
+            privateClusterConfig:
+              - enablePrivateNodes: $(spec.securityConfig.privateClusterConfig.enablePrivateNodes)
+                enablePrivateEndpoint: $(spec.securityConfig.privateClusterConfig.enablePrivateEndpoint)
+                masterIpv4CidrBlock: $(spec.securityConfig.privateClusterConfig.masterIpv4CidrBlock)
+            # Master authorized networks
+            masterAuthorizedNetworksConfig:
+              - cidrBlocks:
+                  - cidrBlock: $(spec.securityConfig.privateClusterConfig.masterAuthorizedNetworks[0].cidrBlock)
+                    displayName: "Authorized Network"
+            # VPC references for dedicated network
+            network: "projects/$(spec.projectID)/global/networks/$(spec.clusterName)-network"
+            subnetwork: "projects/$(spec.projectID)/regions/$(spec.location)/subnetworks/$(spec.clusterName)-subnet"
+            releaseChannel:
+              - channel: $(spec.releaseChannel)
+            datapathProvider: ADVANCED_DATAPATH
+            workloadIdentityConfig:
+              - workloadPool: $(spec.projectID).svc.id.goog
+            addonsConfig:
+              - httpLoadBalancing:
+                  - disabled: false
+                horizontalPodAutoscaling:
+                  - disabled: false
+                networkPolicyConfig:
+                  - disabled: false
+                gceFilestoreCsiDriverConfig:
+                  - enabled: true
+                gcePersistentDiskCsiDriverConfig:
+                  - enabled: true
+            verticalPodAutoscaling:
+              - enabled: true
+          writeConnectionSecretToRef:
+            namespace: crossplane-system
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.projectID
+        
+        # Patch location
+        - fromFieldPath: spec.location
+          toFieldPath: spec.forProvider.location
+
+        # Patch version
+        - fromFieldPath: spec.clusterVersion
+          toFieldPath: spec.forProvider.minMasterVersion
+        
+        # Patch connection secret config
+        - fromFieldPath: metadata.uid
+          toFieldPath: spec.writeConnectionSecretToRef.name
+          transforms:
+            - type: string
+              string:
+                fmt: "gke-cluster-%s"
+                
+        # Apply security config patches
+        - type: PatchSet
+          patchSetName: security-config
+
+        # Patch maintenance policy
+        - fromFieldPath: spec.maintenanceWindow.startTime
+          toFieldPath: spec.forProvider.maintenancePolicy[0].dailyMaintenanceWindow[0].startTime
+          transforms:
+            - type: string
+              string:
+                fmt: "%s:00"
+                
+        # Patch maintenance recurrence if specified
+        - fromFieldPath: spec.maintenanceWindow.recurrence
+          toFieldPath: spec.forProvider.maintenancePolicy[0].recurringWindow[0].recurrence
+          policy:
+            fromFieldPath: Optional
+            
+        # Patch maintenance exclusion windows for production
+        - fromFieldPath: spec.highAvailabilityConfig.maintenanceExclusionWindows
+          toFieldPath: spec.forProvider.maintenancePolicy[0].maintenanceExclusion
+          policy:
+            fromFieldPath: Optional
+            
+        # Patch regional configuration
+        - fromFieldPath: spec.highAvailabilityConfig.regionalCluster
+          toFieldPath: spec.forProvider.location
+          transforms:
+            - type: map
+              map:
+                "true": "$(spec.location)"
+                "false": "$(spec.location)-a"
+          policy:
+            fromFieldPath: Optional
+
+    - name: gke-node-pool
+      base:
+        apiVersion: container.gcp.upbound.io/v1beta1
+        kind: NodePool
+        metadata:
+          annotations:
+            crossplane.io/external-name: "$(spec.clusterName)-nodes"
+          labels:
+            crossplane.io/composition: gke-node-pool
+        spec:
+          forProvider:
+            location: $(spec.location)
+            cluster: $(spec.clusterName)
+            nodeCount: 1
+            management:
+              - autoRepair: true
+                autoUpgrade: true
+            maxPodsPerNode: 110
+            nodeConfig:
+              - diskSizeGb: 100
+                diskType: pd-standard
+                imageType: COS_CONTAINERD
+                machineType: e2-standard-2
+                oauthScopes:
+                  - https://www.googleapis.com/auth/logging.write
+                  - https://www.googleapis.com/auth/monitoring
+                  - https://www.googleapis.com/auth/devstorage.read_only
+                serviceAccount: $(spec.nodeConfig.serviceAccount)
+                metadata:
+                  disable-legacy-endpoints: "true"
+                shieldedInstanceConfig:
+                  - enableIntegrityMonitoring: $(spec.securityConfig.enableIntegrityMonitoring)
+                    enableSecureBoot: $(spec.securityConfig.enableSecureBoot)
+                workloadMetadataConfig:
+                  - mode: GKE_METADATA
+                labels:
+                  environment: $(common.metadata.labels.environment)
+                  role: $(common.metadata.labels.role)
+      patches:
+        # Patch standard metadata
+        - type: PatchSet
+          patchSetName: metadata-patch
+
+        # Patch provider configuration
+        - fromFieldPath: spec.providerConfigRef.name
+          toFieldPath: spec.providerConfigRef.name
+          
+        # Patch project ID
+        - fromFieldPath: spec.projectID
+          toFieldPath: spec.forProvider.projectID
+
+        # Link to cluster
+        - fromFieldPath: spec.clusterName
+          toFieldPath: spec.forProvider.cluster
+
+        # Patch location
+        - fromFieldPath: spec.location
+          toFieldPath: spec.forProvider.location
+
+        # Patch location based on high availability config
+        - fromFieldPath: spec.highAvailabilityConfig.regionalCluster
+          toFieldPath: spec.forProvider.location
+          transforms:
+            - type: map
+              map:
+                "true": "$(spec.location)"
+                "false": "$(spec.location)-a"
+          policy:
+            fromFieldPath: Optional
+
+        # Patch common parameters
+        - type: PatchSet
+          patchSetName: common-parameters
+
+        # Patch node count
+        - fromFieldPath: spec.nodeConfig.nodeCount
+          toFieldPath: spec.forProvider.nodeCount
+
+        # Patch autoscaling if enabled
+        - fromFieldPath: spec.nodeConfig.autoscaling.minNodeCount
+          toFieldPath: spec.forProvider.autoscaling[0].minNodeCount
+          policy:
+            fromFieldPath: Required
+        - fromFieldPath: spec.nodeConfig.autoscaling.maxNodeCount
+          toFieldPath: spec.forProvider.autoscaling[0].maxNodeCount
+          policy:
+            fromFieldPath: Required
+
+        # Patch node labels if provided
+        - fromFieldPath: spec.nodeConfig.labels
+          toFieldPath: spec.forProvider.nodeConfig[0].labels
+          policy:
+            fromFieldPath: Optional

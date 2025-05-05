@@ -230,7 +230,6 @@ spec:
               required:
                 - providerConfigRef
                 - projectID
-                - networkConfig
                 - nodeConfig
             status:
               type: object
