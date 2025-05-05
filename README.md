@@ -206,24 +206,22 @@ Follow these steps to deploy the platform:
 
 ### Step 1: Set Up Google Cloud Projects
 
-1. Create the required GCP projects:
+1. Create the infrastructure and environment projects:
 
 ```bash
-# Create Host Project
-gcloud projects create your-host-project-id --name="Infrastructure Host"
+# Create Infrastructure Project
+gcloud projects create your-infra-project-id --name="Infrastructure"
 
-# Create Service Projects
+# Create Internal Environment Projects (optional)
 gcloud projects create your-dev-project-id --name="Development"
 gcloud projects create your-staging-project-id --name="Staging"
 gcloud projects create your-prod-project-id --name="Production"
 ```
 
-2. Run the setup script to configure project resources:
+2. Run the setup script to initialize the infrastructure:
 
 ```bash
-./scripts/setup.sh \
-  --host-project your-host-project-id \
-  --service-projects your-dev-project-id,your-staging-project-id,your-prod-project-id
+./scripts/setup.sh --project your-infra-project-id
 ```
 
 ### Step 2: Update Configuration Values
@@ -231,9 +229,9 @@ gcloud projects create your-prod-project-id --name="Production"
 Edit the following files with your specific project information:
 
 1. **Terraform Variables** (`infra/environments/dev/terraform.tfvars`):
-   - Replace `your-gcp-project-id` with your host project ID
-   - Replace `your-dev-project-id`, `your-staging-project-id`, and `your-prod-project-id` with your service project IDs
-   - Update service account values in the `subnet_iam_bindings` section
+   - Replace `your-infra-project-id` with your infrastructure project ID
+   - Replace `your-dev-project-id`, `your-staging-project-id`, and `your-prod-project-id` with your environment project IDs
+   - Update service account values as needed
 
 2. **Terraform Backend** (`infra/environments/dev/backend.tf`):
    - Replace `your-terraform-state-bucket` with your GCS bucket name
@@ -251,12 +249,12 @@ Edit the following files with your specific project information:
 
 Add these secrets to your GitHub repository:
 
-- `GCP_HOST_PROJECT_ID`: Your host project ID
+- `GCP_INFRA_PROJECT_ID`: Your infrastructure project ID
 - `GCP_SA_KEY`: Base64-encoded service account key (output from setup script)
 - `GCP_TERRAFORM_STATE_BUCKET`: GCS bucket name for Terraform state
-- `GCP_DEV_PROJECT_ID`: Your development project ID
-- `GCP_STAGING_PROJECT_ID`: Your staging project ID
-- `GCP_PROD_PROJECT_ID`: Your production project ID
+- `GCP_DEV_PROJECT_ID`: Your development project ID (if using internal environments)
+- `GCP_STAGING_PROJECT_ID`: Your staging project ID (if using internal environments)
+- `GCP_PROD_PROJECT_ID`: Your production project ID (if using internal environments)
 
 ### Step 4: Deploy Infrastructure
 
@@ -740,9 +738,14 @@ kubectl get pods -n default
 To remove all resources when you're done:
 
 ```bash
-./scripts/cleanup.sh \
-  --host-project your-host-project-id \
-  --service-projects your-dev-project-id,your-staging-project-id,your-prod-project-id
+./scripts/cleanup.sh --project your-infra-project-id
+```
+
+For client projects, you can delete them individually:
+
+```bash
+# Delete client resources and project
+./scripts/cleanup-client.sh --project client-project-id
 ```
 
 ## Contributing
