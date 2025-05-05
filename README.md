@@ -79,14 +79,14 @@ flowchart LR
     GH --> CICD[Configure<br>CI/CD Pipeline]
     CICD --> SEC[Deploy Security<br>Add-ons]
     SEC --> MON[Setup Monitoring<br>& Alerting]
-    MON --> END[Ready for<br>Client Workloads]
+    MON --> FINISH[Ready for<br>Client Workloads]
     
     classDef start fill:#f9f9f9,stroke:#333,stroke-width:1px;
     classDef infra fill:#e1f5fe,stroke:#333,stroke-width:1px;
     classDef deploy fill:#e8f5e9,stroke:#333,stroke-width:1px;
-    classDef end fill:#fff0f5,stroke:#333,stroke-width:1px;
+    classDef finish fill:#fff0f5,stroke:#333,stroke-width:1px;
     
-    class START,END start;
+    class START,FINISH start;
     class PROJ,VPC infra;
     class GKE,DB,GH,CICD,SEC,MON deploy;
 ```
