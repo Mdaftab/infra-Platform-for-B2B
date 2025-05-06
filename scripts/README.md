@@ -8,13 +8,8 @@ This directory contains automation scripts for managing the Multi-Cluster Kubern
 **One-command client onboarding** - The main script that orchestrates the entire client onboarding process, including GCP project creation, GKE cluster provisioning, and GitHub setup.
 
 ### create-client-cluster-dedicated.sh
-Creates a client-specific GKE cluster with a dedicated VPC in the client's GCP project (recommended approach).
+Creates a client-specific GKE cluster with a dedicated VPC in the client's GCP project for complete isolation.
 
-### create-client-cluster.sh
-Creates a client-specific GKE cluster using the shared VPC architecture (alternative approach).
-
-### add-client-subnet.sh
-Adds a subnet for a client in the shared VPC (used with the shared VPC approach).
 
 ### setup-github-client.sh
 Sets up a GitHub project and repository for a client, including CI/CD configuration.

@@ -10,11 +10,8 @@ This directory contains Crossplane resources for dynamically provisioning and ma
 
 ## Compositions
 
-### gke-cluster.yaml
-The original composition that provisions GKE clusters using a shared VPC architecture.
-
 ### gke-cluster-dedicated.yaml
-Enhanced composition that provisions GKE clusters with dedicated VPC networks for B2B clients, providing complete tenant isolation.
+The composition that provisions GKE clusters with dedicated VPC networks for clients, providing complete tenant isolation in separate projects.
 
 ## XResources
 
@@ -22,13 +19,10 @@ Enhanced composition that provisions GKE clusters with dedicated VPC networks fo
 Defines the schema for GKE cluster resources, including networking, security, and node configuration options.
 
 ### dev-gke-cluster-claim.yaml, staging-gke-cluster-claim.yaml, prod-gke-cluster-claim.yaml
-Claims for creating standard environment clusters (dev, staging, prod) using the shared VPC architecture.
-
-### client-gke-cluster-template.yaml
-Template for creating client-specific clusters using the shared VPC architecture.
+Claims for creating standard environment clusters (dev, staging, prod) using the dedicated VPC architecture.
 
 ### client-gke-cluster-dedicated-template.yaml
-Template for creating client-specific clusters with dedicated VPC networks (recommended for B2B).
+Template for creating client-specific clusters with dedicated VPC networks in their own projects.
 
 ## Usage
 
@@ -39,7 +33,7 @@ New client clusters can be created by:
    ../scripts/onboard-client.sh
    ```
 
-2. Using the dedicated client cluster script:
+2. Using the client cluster creation script:
    ```bash
    ../scripts/create-client-cluster-dedicated.sh
    ```

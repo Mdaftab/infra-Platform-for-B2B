@@ -166,59 +166,6 @@ resource "google_compute_network_peering" "vpc_peerings" {
   ]
 }
 
-# Shared VPC configuration if this is the host project
-resource "google_compute_shared_vpc_host_project" "host" {
-  count      = var.is_shared_vpc_host ? 1 : 0
-  project    = var.project_id
-}
-
-# Service project attachments if this is a shared VPC
-resource "google_compute_shared_vpc_service_project" "service_projects" {
-  for_each        = var.is_shared_vpc_host ? toset(var.service_project_ids) : []
-  host_project    = var.project_id
-  service_project = each.value
-  
-  depends_on = [
-    google_compute_shared_vpc_host_project.host
-  ]
-}
-
-# IAM permissions for service accounts to use shared VPC
-resource "google_project_iam_member" "shared_vpc_users" {
-  for_each = var.is_shared_vpc_host ? {
-    for pair in var.shared_vpc_users : "${pair.service_account}-${pair.role}" => pair
-  } : {}
-  
-  project = var.project_id
-  role    = each.value.role
-  member  = "serviceAccount:${each.value.service_account}"
-}
-
-# Subnet-level IAM bindings for more granular access control
-resource "google_compute_subnetwork_iam_binding" "subnet_iam_bindings" {
-  for_each = var.is_shared_vpc_host ? {
-    for binding_pair in flatten([
-      for subnet_name, bindings in var.subnet_iam_bindings : [
-        for binding in bindings : {
-          subnet_name = subnet_name
-          role        = binding.role
-          members     = binding.members
-        }
-      ]
-    ]) : "${binding_pair.subnet_name}-${binding_pair.role}" => binding_pair
-  } : {}
-  
-  project     = var.project_id
-  region      = var.region
-  subnetwork  = google_compute_subnetwork.subnets[each.value.subnet_name].name
-  role        = each.value.role
-  members     = each.value.members
-  
-  depends_on = [
-    google_compute_shared_vpc_host_project.host,
-    google_compute_subnetwork.subnets
-  ]
-}
 
 # Custom firewall rules for environment isolation and connectivity
 resource "google_compute_firewall" "custom_rules" {

@@ -19,12 +19,10 @@ spec:
     startTime: "03:00"
     recurrence: "FREQ=WEEKLY;BYDAY=SA,SU"
   
-  # Network configuration - Use shared VPC architecture
+  # Network configuration - Dedicated VPC architecture
   networkConfig:
-    hostProjectID: ${GCP_HOST_PROJECT_ID}
-    networkName: shared-vpc
-    subnetName: CLIENT_NAME-subnet
-    # Secondary ranges are defined in the shared VPC and referenced by name
+    useExistingNetwork: false
+    # No host project needed for dedicated VPC architecture
   
   # Node configuration
   nodeConfig:
@@ -32,7 +30,7 @@ spec:
     machineType: e2-standard-2
     diskSizeGb: 50
     diskType: pd-standard
-    serviceAccount: shared-gke-node-sa@${CLIENT_PROJECT_ID}.iam.gserviceaccount.com
+    serviceAccount: gke-node-sa@${CLIENT_PROJECT_ID}.iam.gserviceaccount.com
     autoscaling:
       minNodeCount: 1
       maxNodeCount: 3
@@ -52,4 +50,4 @@ spec:
       enablePrivateEndpoint: false
       masterIpv4CidrBlock: "172.16.X.16/28" # Replace X with client-specific block
       masterAuthorizedNetworks:
-        - cidrBlock: "10.0.0.0/20" # Shared VPC subnet CIDR to allow communication from infracluster
+        - cidrBlock: "0.0.0.0/0" # Allow access from the infrastructure cluster

@@ -1,5 +1,5 @@
 ## ==========================================================================
-## Shared Infrastructure Environment Configuration
+## Infrastructure Environment Configuration
 ## ==========================================================================
 
 # Project Settings
@@ -26,70 +26,24 @@ apis_to_enable = [
   # "spanner.googleapis.com",         # Example additional API for high-scale client
 ]
 
-# Network - Enhanced Shared VPC Configuration
-shared_vpc_config = {
+# Network - Infrastructure VPC Configuration
+infra_vpc_config = {
   # Main network settings
-  network_name = "shared-vpc"
+  network_name = "infra-vpc"
   enable_flow_logs = true
   create_nat_gateway = true
   
-  # Enable shared VPC host project
-  is_shared_vpc_host = true
-  
-  # Service projects to attach to shared VPC
-  service_project_ids = [
-    "your-dev-project-id",      # Development environment project
-    "your-staging-project-id",  # Staging environment project
-    "your-prod-project-id"      # Production environment project
-  ]
-  
-  # Subnets configuration with environment-specific subnets in the shared VPC
+  # Subnets configuration for the infrastructure VPC
   subnets = [
     # Infrastructure subnet for the infracluster
     {
-      name = "shared-infra-subnet"
+      name = "infra-subnet"
       ip_cidr_range = "10.0.0.0/20"
       region = "us-central1"
       private = true
       secondary_ranges = {
         pods = "10.16.0.0/16"
         services = "10.17.0.0/20"
-      }
-    },
-    
-    # Development environment subnet in the shared VPC
-    {
-      name = "dev-subnet"
-      ip_cidr_range = "10.20.0.0/20"
-      region = "us-central1"
-      private = true
-      secondary_ranges = {
-        pods = "10.32.0.0/16"
-        services = "10.33.0.0/20"
-      }
-    },
-    
-    # Staging environment subnet in the shared VPC
-    {
-      name = "staging-subnet"
-      ip_cidr_range = "10.40.0.0/20"
-      region = "us-central1"
-      private = true
-      secondary_ranges = {
-        pods = "10.48.0.0/16"
-        services = "10.49.0.0/20"
-      }
-    },
-    
-    # Production environment subnet in the shared VPC
-    {
-      name = "prod-subnet"
-      ip_cidr_range = "10.60.0.0/20"
-      region = "us-central1"
-      private = true
-      secondary_ranges = {
-        pods = "10.64.0.0/16"
-        services = "10.65.0.0/20"
       }
     },
     
@@ -104,7 +58,7 @@ shared_vpc_config = {
     
     # External-facing subnet for load balancers and services
     {
-      name = "shared-proxy-subnet"
+      name = "proxy-subnet"
       ip_cidr_range = "10.0.16.0/22"
       region = "us-central1"
       private = false
@@ -115,75 +69,23 @@ shared_vpc_config = {
     }
   ]
   
-  # Subnet IAM bindings - environment-specific service accounts
-  # can use specific subnets in the shared VPC
-  subnet_iam_bindings = {
-    "dev-subnet" = [
-      {
-        role = "roles/compute.networkUser"
-        members = [
-          "serviceAccount:service-{your-dev-project-number}@container-engine-robot.iam.gserviceaccount.com",
-          "serviceAccount:shared-gke-node-sa@your-dev-project-id.iam.gserviceaccount.com"
-        ]
-      }
-    ],
-    "staging-subnet" = [
-      {
-        role = "roles/compute.networkUser"
-        members = [
-          "serviceAccount:service-{your-staging-project-number}@container-engine-robot.iam.gserviceaccount.com",
-          "serviceAccount:shared-gke-node-sa@your-staging-project-id.iam.gserviceaccount.com"
-        ]
-      }
-    ],
-    "prod-subnet" = [
-      {
-        role = "roles/compute.networkUser"
-        members = [
-          "serviceAccount:service-{your-prod-project-number}@container-engine-robot.iam.gserviceaccount.com",
-          "serviceAccount:shared-gke-node-sa@your-prod-project-id.iam.gserviceaccount.com"
-        ]
-      }
-    ],
-    "db-subnet" = [
-      {
-        role = "roles/compute.networkUser"
-        members = [
-          "serviceAccount:service-{your-dev-project-number}@container-engine-robot.iam.gserviceaccount.com",
-          "serviceAccount:service-{your-staging-project-number}@container-engine-robot.iam.gserviceaccount.com", 
-          "serviceAccount:service-{your-prod-project-number}@container-engine-robot.iam.gserviceaccount.com"
-        ]
-      }
-    ]
-  }
-  
-  # Environment-specific firewall rules
+  # Infrastructure-specific firewall rules
   firewall_rules = {
-    "allow-dev-to-db" = {
-      description = "Allow Dev GKE cluster to access DB subnet"
-      source_ranges = ["10.20.0.0/20", "10.32.0.0/16"]
+    "allow-infra-to-db" = {
+      description = "Allow Infrastructure GKE cluster to access DB subnet"
+      source_ranges = ["10.0.0.0/20", "10.16.0.0/16"]
       target_ranges = ["10.80.0.0/20"]
       allow = [{
         protocol = "tcp"
         ports = ["3306", "5432", "6379", "27017"]
       }]
     },
-    "allow-staging-to-db" = {
-      description = "Allow Staging GKE cluster to access DB subnet"
-      source_ranges = ["10.40.0.0/20", "10.48.0.0/16"]
-      target_ranges = ["10.80.0.0/20"]
+    "allow-all-internal" = {
+      description = "Allow all traffic between internal subnets"
+      source_ranges = ["10.0.0.0/8"]
+      target_ranges = ["10.0.0.0/8"]
       allow = [{
-        protocol = "tcp"
-        ports = ["3306", "5432", "6379", "27017"]
-      }]
-    },
-    "allow-prod-to-db" = {
-      description = "Allow Prod GKE cluster to access DB subnet"
-      source_ranges = ["10.60.0.0/20", "10.64.0.0/16"]
-      target_ranges = ["10.80.0.0/20"]
-      allow = [{
-        protocol = "tcp"
-        ports = ["3306", "5432", "6379", "27017"]
+        protocol = "all"
       }]
     }
   }
@@ -197,8 +99,8 @@ infracluster_config = {
   location = "us-central1"
   release_channel = "REGULAR"
   network_config = {
-    network_name = "shared-vpc"
-    subnet_name = "shared-infra-subnet" 
+    network_name = "infra-vpc"
+    subnet_name = "infra-subnet" 
     master_ipv4_cidr_block = "172.16.0.0/28"
     cluster_ipv4_cidr_block = "10.16.0.0/16"
     services_ipv4_cidr_block = "10.17.0.0/20"
@@ -223,10 +125,10 @@ infracluster_config = {
       node_metadata = "GKE_METADATA"
       preemptible = true
       labels = {
-        environment = "shared"
+        environment = "infrastructure"
         role = "infrastructure"
       }
-      tags = ["shared-vpc", "infracluster"]
+      tags = ["infra-vpc", "infracluster"]
     }
   ]
   

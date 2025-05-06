@@ -45,12 +45,12 @@ variable "region" {
 }
 
 variable "environment" {
-  description = "Environment name (e.g., shared, dev, staging, prod)"
+  description = "Environment name (e.g., infrastructure, dev, staging, prod)"
   type        = string
 
   validation {
-    condition     = contains(["shared", "dev", "staging", "prod"], var.environment)
-    error_message = "Environment must be one of: shared, dev, staging, prod."
+    condition     = contains(["infrastructure", "dev", "staging", "prod"], var.environment)
+    error_message = "Environment must be one of: infrastructure, dev, staging, prod."
   }
 }
 
@@ -111,26 +111,6 @@ variable "peer_vpcs" {
   default = {}
 }
 
-variable "is_shared_vpc_host" {
-  description = "Whether this VPC is a shared VPC host project"
-  type        = bool
-  default     = false
-}
-
-variable "service_project_ids" {
-  description = "List of service project IDs to attach to this shared VPC host project"
-  type        = list(string)
-  default     = []
-}
-
-variable "shared_vpc_users" {
-  description = "List of service accounts and their roles to grant shared VPC permissions"
-  type = list(object({
-    service_account = string
-    role            = string
-  }))
-  default = []
-}
 
 variable "prevent_destroy" {
   description = "Whether to prevent destruction of the VPC resource"
@@ -149,14 +129,6 @@ variable "vpc_peerings" {
   default = {}
 }
 
-variable "subnet_iam_bindings" {
-  description = "IAM bindings for specific subnets in the shared VPC"
-  type = map(list(object({
-    role = string
-    members = list(string)
-  })))
-  default = {}
-}
 
 variable "firewall_rules" {
   description = "Custom firewall rules to create for the VPC"

@@ -30,17 +30,13 @@ module "apis" {
 
 This allows different clients to enable only the APIs they need, which improves security and reduces unnecessary service enablement.
 
-### Two Architecture Options
+### Dedicated VPC Architecture
 
-1. **Shared VPC Architecture**
-   - Defined in the `vpc` module
-   - Central host project with service projects attached
-   - Subnet-level isolation for different environments
-
-2. **Dedicated VPC Architecture**
-   - Dynamically created by Crossplane compositions
-   - Complete network isolation per client
-   - Independent billing and quota management
+The platform uses a dedicated VPC architecture:
+- Dynamically created by Crossplane compositions
+- Complete network isolation per client in separate projects
+- Independent billing and quota management
+- Full tenant isolation with dedicated resources
 
 ## Usage
 

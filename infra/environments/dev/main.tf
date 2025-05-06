@@ -16,8 +16,8 @@
 
 ## ==========================================================================
 ## Infrastructure Configuration
-## This implements a shared VPC host project with an infracluster that runs
-## Crossplane to dynamically provision application clusters in service projects.
+## This implements an infrastructure project with a GKE cluster that runs
+## Crossplane to dynamically provision client-specific resources in dedicated projects.
 ## ==========================================================================
 
 # Configure provider with minimal access scopes for security
@@ -38,26 +38,8 @@ locals {
     managed_by  = "terraform"
     project     = var.project_id
     application = "crossplane-infrastructure"
-    environment = "shared"
+    environment = "infrastructure"
   }
-  
-  # Collect service account emails for shared VPC access
-  shared_vpc_users = concat(
-    # Crossplane SA
-    [
-      {
-        service_account = module.iam.crossplane_sa_email
-        role            = "roles/compute.networkUser"
-      }
-    ],
-    # Add GKE SA if configured
-    [
-      {
-        service_account = module.iam.gke_node_sa_email
-        role            = "roles/compute.networkUser"
-      }
-    ]
-  )
 }
 
 ## ==========================================================================
@@ -71,31 +53,23 @@ module "apis" {
 }
 
 ## ==========================================================================
-## Shared VPC Network - Host for all clusters
+## Infrastructure VPC Network
 ## ==========================================================================
 
-module "shared_vpc" {
+module "infra_vpc" {
   source       = "../../modules/vpc"
   project_id   = var.project_id
-  network_name = var.shared_vpc_config.network_name
+  network_name = var.infra_vpc_config.network_name
   region       = var.region
-  environment  = "shared"
+  environment  = "infrastructure"
   
   # Network settings
-  subnets               = var.shared_vpc_config.subnets
-  enable_flow_logs      = var.shared_vpc_config.enable_flow_logs
-  create_nat_gateway    = var.shared_vpc_config.create_nat_gateway
+  subnets               = var.infra_vpc_config.subnets
+  enable_flow_logs      = var.infra_vpc_config.enable_flow_logs
+  create_nat_gateway    = var.infra_vpc_config.create_nat_gateway
   
-  # Enhanced Shared VPC configuration
-  is_shared_vpc_host    = var.shared_vpc_config.is_shared_vpc_host
-  service_project_ids   = var.shared_vpc_config.service_project_ids
-  shared_vpc_users      = local.shared_vpc_users
-  
-  # Subnet-level IAM bindings for fine-grained access control
-  subnet_iam_bindings   = lookup(var.shared_vpc_config, "subnet_iam_bindings", {})
-  
-  # Environment-specific firewall rules
-  firewall_rules        = lookup(var.shared_vpc_config, "firewall_rules", {})
+  # Firewall rules
+  firewall_rules        = lookup(var.infra_vpc_config, "firewall_rules", {})
   
   # Enable more secure networking by preventing destruction
   prevent_destroy       = true
@@ -110,7 +84,7 @@ module "shared_vpc" {
 module "iam" {
   source      = "../../modules/iam"
   project_id  = var.project_id
-  environment = "shared" # These service accounts are shared among all clusters
+  environment = "infrastructure" # These service accounts are for the infrastructure cluster
   
   depends_on  = [module.apis]
 }
@@ -134,7 +108,7 @@ module "gcr" {
 
 module "gke" {
   source      = "../../modules/gke"
-  depends_on  = [module.shared_vpc, module.iam, module.apis]
+  depends_on  = [module.infra_vpc, module.iam, module.apis]
   
   # Basic cluster configuration
   project_id   = var.project_id
@@ -143,10 +117,10 @@ module "gke" {
   description  = var.infracluster_config.description
   
   # Networking
-  network_name                 = module.shared_vpc.network_name
-  subnet_name                  = module.shared_vpc.subnet_names[var.infracluster_config.network_config.subnet_name]
-  cluster_secondary_range_name = module.shared_vpc.subnet_secondary_ranges[var.infracluster_config.network_config.subnet_name].pods
-  services_secondary_range_name = module.shared_vpc.subnet_secondary_ranges[var.infracluster_config.network_config.subnet_name].services
+  network_name                 = module.infra_vpc.network_name
+  subnet_name                  = module.infra_vpc.subnet_names[var.infracluster_config.network_config.subnet_name]
+  cluster_secondary_range_name = module.infra_vpc.subnet_secondary_ranges[var.infracluster_config.network_config.subnet_name].pods
+  services_secondary_range_name = module.infra_vpc.subnet_secondary_ranges[var.infracluster_config.network_config.subnet_name].services
   
   # GKE configuration
   regional                 = var.infracluster_config.regional
@@ -197,22 +171,22 @@ resource "local_file" "crossplane_sa_key" {
   file_permission = "0600" # Ensure secure permissions for key file
 }
 
-# Store shared VPC info for service projects
-resource "local_file" "shared_vpc_info" {
+# Store infrastructure VPC info for reference
+resource "local_file" "infra_vpc_info" {
   content = jsonencode({
-    network_name = module.shared_vpc.network_name
-    network_id   = module.shared_vpc.network_id
-    subnet_ids   = module.shared_vpc.subnet_ids
-    subnet_names = module.shared_vpc.subnet_names
+    network_name = module.infra_vpc.network_name
+    network_id   = module.infra_vpc.network_id
+    subnet_ids   = module.infra_vpc.subnet_ids
+    subnet_names = module.infra_vpc.subnet_names
     subnets      = {
-      for name, subnet in module.shared_vpc.subnet_names : name => {
-        region     = module.shared_vpc.subnet_regions[name]
-        cidr_block = module.shared_vpc.subnet_cidr_blocks[name]
-        pods_cidr  = module.shared_vpc.subnet_secondary_cidr_blocks[name].pods
-        svc_cidr   = module.shared_vpc.subnet_secondary_cidr_blocks[name].services
+      for name, subnet in module.infra_vpc.subnet_names : name => {
+        region     = module.infra_vpc.subnet_regions[name]
+        cidr_block = module.infra_vpc.subnet_cidr_blocks[name]
+        pods_cidr  = module.infra_vpc.subnet_secondary_cidr_blocks[name].pods
+        svc_cidr   = module.infra_vpc.subnet_secondary_cidr_blocks[name].services
       }
     }
   })
-  filename        = "${path.module}/shared-vpc-info.json"
+  filename        = "${path.module}/infra-vpc-info.json"
   file_permission = "0644"
 }

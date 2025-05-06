@@ -3,7 +3,7 @@
 ## ==========================================================================
 
 variable "project_id" {
-  description = "The GCP project ID for the host project (shared VPC)"
+  description = "The GCP project ID for the infrastructure project"
   type        = string
 
   validation {
@@ -42,17 +42,15 @@ variable "apis_to_enable" {
 }
 
 ## ==========================================================================
-## Shared VPC Network Configuration
+## Infrastructure VPC Network Configuration
 ## ==========================================================================
 
-variable "shared_vpc_config" {
-  description = "Configuration for the shared VPC network"
+variable "infra_vpc_config" {
+  description = "Configuration for the infrastructure VPC network"
   type = object({
     network_name        = string
     enable_flow_logs    = optional(bool, true)
     create_nat_gateway  = optional(bool, true)
-    is_shared_vpc_host  = optional(bool, true)
-    service_project_ids = optional(list(string), [])
     subnets = list(object({
       name           = string
       ip_cidr_range  = string
@@ -66,8 +64,8 @@ variable "shared_vpc_config" {
   })
 
   validation {
-    condition     = length(var.shared_vpc_config.subnets) > 0
-    error_message = "At least one subnet must be defined in the shared VPC."
+    condition     = length(var.infra_vpc_config.subnets) > 0
+    error_message = "At least one subnet must be defined in the infrastructure VPC."
   }
 }
 
