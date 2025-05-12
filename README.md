@@ -293,6 +293,55 @@ CM-lab/
     └── create-client-cluster.sh      # Create client-specific cluster
 ```
 
+## Meeting the Project Requirements
+
+This project is designed to meet the mandatory requirements outlined in the project assessment document. Here's how the implementation addresses each requirement and how an interviewer can verify it:
+
+### 1. Infrastructure (Minimal cloud setup using IaC)
+
+*   **Requirement:** Create a minimal cloud setup using IaC (Terraform, Crossplane composition), including a basic VPC and a single Kubernetes cluster.
+*   **Implementation:**
+    *   Base infrastructure (VPC, Infracluster GKE) is defined using Terraform in the `infra/` directory. See `infra/environments/dev/main.tf` and modules in `infra/modules/`.
+    *   Application GKE clusters are provisioned using Crossplane Compositions (`crossplane/compositions/gke-cluster.yaml`) and a Composite Resource Definition (`crossplane/xresources/gke-cluster-definition.yaml`).
+    *   A claim for a single development application cluster is defined in `crossplane/xresources/dev-gke-cluster-claim.yaml`, demonstrating the provisioning of a single cluster using the Crossplane abstraction.
+*   **Verification:**
+    *   Examine the Terraform files in `infra/` to see the VPC and Infracluster definition.
+    *   Review the Crossplane files in `crossplane/` to understand the Composition and the `dev-gke-cluster-claim.yaml`.
+    *   Follow the "Getting Started" steps to deploy the infrastructure and the dev cluster. Use `gcloud` and `kubectl` commands (like `gcloud container clusters list` and `kubectl get gkecluster.platform.commercelab.io`) to verify the created resources.
+
+### 2. Application Deployment (Simple containerized app with configuration management)
+
+*   **Requirement:** Deploy a simple containerized application to the Kubernetes cluster and show how its configuration is managed.
+*   **Implementation:**
+    *   A simple "Hello World" Go application is located in `workloads/hello-world/app/`. See `workloads/hello-world/app/main.go`.
+    *   The application's deployment configuration is managed using a Helm chart in `workloads/hello-world/`. Key files include `workloads/hello-world/Chart.yaml`, `values.yaml`, and templates in `workloads/hello-world/templates/`.
+*   **Verification:**
+    *   Review the Go code and the Helm chart files.
+    *   Follow the "Getting Started" steps to deploy the application using the provided GitHub Actions workflow or manually using Helm commands (after connecting to the cluster).
+    *   Use `kubectl get pods`, `kubectl get svc`, and `kubectl get ingress` in the application cluster's namespace to verify the deployment. Access the application via its Ingress endpoint if configured.
+
+### 3. Automation (GitOps or CI/CD example/explanation)
+
+*   **Requirement:** Provide a brief example or explanation of how you would automate updates/deployments.
+*   **Implementation:**
+    *   The project uses GitHub Actions for CI/CD and GitOps.
+    *   Workflow definitions are located in `.github/workflows/`. These workflows automate infrastructure deployment, Crossplane bootstrapping, cluster provisioning, and application deployment.
+    *   The `README.md` provides an explanation of these workflows and how to trigger them.
+*   **Verification:**
+    *   Examine the workflow files in `.github/workflows/`.
+    *   Read the "Getting Started" section in the `README.md` that describes running these workflows.
+    *   Observe the execution of these workflows in the GitHub Actions tab of the repository after making changes or manually triggering them.
+
+### 4. Expected Deliverables (Source Code, README.md)
+
+*   **Requirement:** Provide source code (Terraform, K8s manifests/Helm, scripts) and a clear README.md.
+*   **Implementation:**
+    *   All required source code is included and organized in the repository.
+    *   The `README.md` provides a project overview, architecture diagrams, getting started steps, project structure, and details on advanced features and troubleshooting.
+*   **Verification:**
+    *   Browse the project repository structure and files.
+    *   Read through the `README.md` to assess its clarity and completeness based on the project's implementation.
+
 ## Architecture Details
 
 ### 1. Infracluster (GKE in Host Project)
